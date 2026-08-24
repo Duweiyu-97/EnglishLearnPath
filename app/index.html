@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#16352f">
+  <meta name="description" content="EnglishLearnPath：本地优先、可自行导入材料的英语学习中心。">
+  <title>EnglishLearnPath · 英语学习路径</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="主导航">
+      <a class="brand" href="#home" data-route="home" aria-label="返回首页">
+        <span class="brand-mark">EL</span>
+        <span><strong>EnglishLearnPath</strong><small>本地学习中心</small></span>
+      </a>
+      <nav class="nav-list">
+        <button class="nav-item is-active" data-route="home"><span>⌂</span>学习概览</button>
+        <button class="nav-item" data-route="listening"><span>◖</span>听力练习</button>
+        <button class="nav-item" data-route="reading"><span>▤</span>阅读练习</button>
+        <button class="nav-item" data-route="writing"><span>✎</span>写作工坊</button>
+        <button class="nav-item" data-route="speaking"><span>◎</span>口语练习</button>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="nav-item" data-route="settings"><span>⚙</span>AI 与数据设置</button>
+        <div class="privacy-note">你的练习记录默认只保存在当前设备。</div>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar">
+        <button id="menuButton" class="icon-button mobile-only" aria-label="打开菜单">☰</button>
+        <div>
+          <div class="eyebrow" id="pageEyebrow">TODAY'S PATH</div>
+          <h1 id="pageTitle">学习概览</h1>
+        </div>
+        <div class="topbar-actions">
+          <span id="aiStatusBadge" class="status-badge status-off">AI 未连接</span>
+          <button class="button button-quiet" data-route="settings">配置 AI</button>
+          <button id="exitApp" class="button button-quiet" title="关闭本地启动器">退出</button>
+        </div>
+      </header>
+
+      <section class="page is-active" data-page="home">
+        <div class="hero panel">
+          <div>
+            <span class="kicker">OPEN · LOCAL · YOURS</span>
+            <h2>把材料留在自己手里，<br>把学习变成可持续的路径。</h2>
+            <p>这里不内置商业题库。你可以导入自己创作、公开许可或合法取得的材料；计时、记录、复盘和基础训练离线即可使用。</p>
+            <div class="button-row">
+              <button class="button button-primary" data-route="writing">开始今日写作</button>
+              <button class="button button-secondary" data-route="guide">查看使用指南</button>
+            </div>
+          </div>
+          <div class="hero-orbit" aria-hidden="true">
+            <span class="orbit-word word-listen">LISTEN</span>
+            <span class="orbit-word word-read">READ</span>
+            <span class="orbit-word word-write">WRITE</span>
+            <span class="orbit-word word-speak">SPEAK</span>
+            <div class="orbit-core">PATH</div>
+          </div>
+        </div>
+
+        <div class="metric-grid">
+          <article class="metric-card"><span>练习总数</span><strong id="metricTotal">0</strong><small>保存在本机</small></article>
+          <article class="metric-card"><span>写作篇数</span><strong id="metricWriting">0</strong><small>草稿与历史</small></article>
+          <article class="metric-card"><span>导入材料</span><strong id="metricImports">0</strong><small>听力与阅读</small></article>
+          <article class="metric-card"><span>连续学习</span><strong id="metricStreak">0</strong><small>天</small></article>
+        </div>
+
+        <div class="section-heading"><div><span class="kicker">FOUR SKILLS</span><h2>选择一条练习路径</h2></div></div>
+        <div class="skill-grid">
+          <button class="skill-card listening-card" data-route="listening"><span class="skill-number">01</span><h3>听力</h3><p>导入自己的音频和练习结构，逐题作答并核对。</p><span class="text-link">进入练习 →</span></button>
+          <button class="skill-card reading-card" data-route="reading"><span class="skill-number">02</span><h3>阅读</h3><p>文章、译文、段落大意与题目解析可随材料一起导入。</p><span class="text-link">进入练习 →</span></button>
+          <button class="skill-card writing-card" data-route="writing"><span class="skill-number">03</span><h3>写作</h3><p>计时写作、字数统计、本地历史与可选 AI 反馈。</p><span class="text-link">进入工坊 →</span></button>
+          <button class="skill-card speaking-card" data-route="speaking"><span class="skill-number">04</span><h3>口语</h3><p>自定义题目、浏览器录音、回听和文本反馈。</p><span class="text-link">进入练习 →</span></button>
+        </div>
+      </section>
+
+      <section class="page" data-page="listening">
+        <div class="page-intro panel compact-panel">
+          <div><span class="kicker">LISTENING LAB</span><h2>听力练习</h2><p>本项目不附带题库或受版权保护的录音。导入你有权使用的材料，数据仅存本机。</p></div>
+          <div class="button-row"><label class="button button-secondary file-button">导入 JSON<input id="listeningImport" type="file" accept="application/json,.json"></label><button id="listeningExample" class="button button-quiet">加载原创示例</button></div>
+        </div>
+        <div class="workspace-grid">
+          <aside class="library panel">
+            <div class="panel-title"><h3>我的材料</h3><span id="listeningCount" class="count-pill">0</span></div>
+            <div id="listeningLibrary" class="library-list empty-state">尚未导入听力材料</div>
+          </aside>
+          <div class="practice panel">
+            <div id="listeningEmpty" class="center-empty"><div class="empty-icon">◖</div><h3>从左侧选择一份材料</h3><p>支持含题目与答案的 JSON；音频由你在练习时从本机选择。</p><a href="../docs/import-format.html" class="text-link">查看导入格式</a></div>
+            <div id="listeningPractice" class="hidden">
+              <div class="practice-head"><div><span class="kicker">ACTIVE MATERIAL</span><h2 id="listeningTitle"></h2><p id="listeningDescription"></p></div><button id="deleteListening" class="button button-danger-quiet">移除材料</button></div>
+              <label class="field"><span>选择本机音频（不会上传）</span><input id="listeningAudio" type="file" accept="audio/*"></label>
+              <audio id="audioPlayer" class="audio-player" controls></audio>
+              <form id="listeningQuestions" class="question-list"></form>
+              <div class="button-row"><button id="checkListening" type="button" class="button button-primary">核对答案</button><button id="resetListening" type="button" class="button button-quiet">清空作答</button></div>
+              <div id="listeningResult" class="feedback-box hidden"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" data-page="reading">
+        <div class="page-intro panel compact-panel">
+          <div><span class="kicker">READING DESK</span><h2>阅读练习</h2><p>导入材料后，原文、翻译、段落大意和逐题解析会按文章直接展示，无需额外点击。</p></div>
+          <div class="button-row"><label class="button button-secondary file-button">导入 JSON<input id="readingImport" type="file" accept="application/json,.json"></label><button id="readingExample" class="button button-quiet">加载原创示例</button></div>
+        </div>
+        <div class="workspace-grid reading-workspace">
+          <aside class="library panel">
+            <div class="panel-title"><h3>我的文章</h3><span id="readingCount" class="count-pill">0</span></div>
+            <div id="readingLibrary" class="library-list empty-state">尚未导入阅读材料</div>
+          </aside>
+          <article class="practice panel reading-paper">
+            <div id="readingEmpty" class="center-empty"><div class="empty-icon">▤</div><h3>从左侧选择一篇文章</h3><p>支持双语段落、段落大意、题目答案及解析。</p><a href="../docs/import-format.html" class="text-link">查看导入格式</a></div>
+            <div id="readingPractice" class="hidden"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="page" data-page="writing">
+        <div class="page-intro panel compact-panel">
+          <div><span class="kicker">WRITING STUDIO</span><h2>写作工坊</h2><p>不预置私人模板或课程资料。用你自己的题目完成计时写作，并把每一次修改留在本机。</p></div>
+          <button id="newWriting" class="button button-primary">新建写作</button>
+        </div>
+        <div class="writing-layout">
+          <aside class="writing-sidebar panel">
+            <div class="panel-title"><h3>写作记录</h3><span id="writingCount" class="count-pill">0</span></div>
+            <div id="writingHistory" class="library-list empty-state">还没有写作记录</div>
+          </aside>
+          <div class="writing-editor panel">
+            <div class="editor-toolbar">
+              <label class="mini-field"><span>类型</span><select id="writingType"><option>Task 2</option><option>Task 1 Academic</option><option>Task 1 General</option><option>自由写作</option></select></label>
+              <label class="mini-field"><span>目标时间</span><select id="writingMinutes"><option value="40">40 分钟</option><option value="20">20 分钟</option><option value="60">60 分钟</option><option value="0">不计时</option></select></label>
+              <div class="timer" id="writingTimer">40:00</div>
+              <button id="toggleTimer" class="button button-secondary">开始计时</button>
+            </div>
+            <label class="field"><span>题目</span><textarea id="writingPrompt" rows="3" placeholder="粘贴或输入你有权使用的题目……"></textarea></label>
+            <label class="field essay-field"><span>正文</span><textarea id="writingEssay" placeholder="Start writing here..." spellcheck="true"></textarea></label>
+            <div class="editor-footer"><span><strong id="wordCount">0</strong> words</span><span id="saveStatus">尚未保存</span></div>
+            <div class="button-row"><button id="saveWriting" class="button button-primary">保存到本机</button><button id="reviewWriting" class="button button-secondary ai-required">AI 写作反馈</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div>
+            <div id="writingReview" class="ai-output hidden"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" data-page="speaking">
+        <div class="page-intro panel compact-panel">
+          <div><span class="kicker">SPEAKING ROOM</span><h2>口语练习</h2><p>输入自己的话题，使用浏览器录音并回听。当前通用 AI 接口只分析你粘贴的文字稿，不会自动上传录音。</p></div>
+        </div>
+        <div class="speaking-grid">
+          <div class="panel speaking-recorder">
+            <label class="field"><span>练习话题</span><textarea id="speakingPrompt" rows="4" placeholder="输入今天想练习的话题或问题……"></textarea></label>
+            <div class="recorder-stage">
+              <div id="recordPulse" class="record-pulse"><span>00:00</span></div>
+              <button id="recordButton" class="record-button">开始录音</button>
+              <p id="recordHint">浏览器会在首次使用时请求麦克风权限</p>
+            </div>
+            <audio id="speakingPlayback" class="audio-player hidden" controls></audio>
+            <button id="downloadRecording" class="button button-quiet hidden">下载本次录音</button>
+          </div>
+          <div class="panel transcript-panel">
+            <div class="panel-title"><div><span class="kicker">TRANSCRIPT</span><h3>文字稿与复盘</h3></div></div>
+            <textarea id="speakingTranscript" class="transcript-area" placeholder="把你说的内容整理或粘贴到这里。这样即使只有文字 API，也能进行表达、语法与结构反馈。"></textarea>
+            <div class="button-row"><button id="saveSpeaking" class="button button-primary">保存练习</button><button id="reviewSpeaking" class="button button-secondary ai-required">AI 口语反馈</button></div>
+            <div id="speakingReview" class="ai-output hidden"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" data-page="settings">
+        <div class="page-intro panel compact-panel">
+          <div><span class="kicker">PRIVATE BY DEFAULT</span><h2>AI 与数据设置</h2><p>基础功能无需 AI。只有完成连接测试后，写作与口语反馈按钮才会启用。</p></div>
+        </div>
+        <div class="settings-grid">
+          <form id="aiSettings" class="panel settings-card">
+            <div class="panel-title"><div><span class="kicker">OPENAI-COMPATIBLE</span><h3>AI 接口</h3></div><span id="settingsAiBadge" class="status-badge status-off">未连接</span></div>
+            <label class="field"><span>接口地址</span><input id="aiBaseUrl" type="url" placeholder="https://api.openai.com/v1" autocomplete="off"><small>支持 OpenAI 兼容的云端 API 或本地模型服务。</small></label>
+            <label class="field"><span>API Key</span><input id="aiApiKey" type="password" placeholder="仅在本次启动期间保存在内存中" autocomplete="off"><small>不会写入浏览器存储、配置文件或 Git 仓库。</small></label>
+            <label class="field"><span>模型名称</span><input id="aiModel" type="text" placeholder="例如：gpt-4.1-mini 或本地模型名" autocomplete="off"></label>
+            <div class="notice"><strong>本地模型提示</strong><p>填写本地服务提供的 OpenAI 兼容地址，例如 <code>http://127.0.0.1:11434/v1</code>。本项目不捆绑模型，模型需要由使用者自行安装和启动。</p></div>
+            <div class="button-row"><button type="submit" class="button button-primary">保存并测试连接</button><button id="disconnectAi" type="button" class="button button-quiet">断开</button></div>
+            <div id="aiTestResult" class="feedback-box hidden"></div>
+          </form>
+          <div class="panel settings-card">
+            <div class="panel-title"><div><span class="kicker">LOCAL DATA</span><h3>本地数据</h3></div></div>
+            <p>练习记录保存在浏览器的本地存储中。导出文件可用于备份或迁移；其中可能包含你的作文和练习材料，请妥善保管。</p>
+            <div class="stacked-actions"><button id="exportData" class="button button-secondary">导出全部数据</button><label class="button button-quiet file-button">导入备份<input id="importData" type="file" accept="application/json,.json"></label><button id="clearData" class="button button-danger-quiet">清空本机数据</button></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="page" data-page="guide">
+        <div class="guide panel">
+          <span class="kicker">START HERE</span><h2>三步开始使用</h2>
+          <div class="guide-steps"><article><span>01</span><h3>先练基础功能</h3><p>写作计时、录音回听以及自己材料的听阅练习都不需要网络或 AI。</p></article><article><span>02</span><h3>导入合法材料</h3><p>使用公开样题、自己创作的材料，或你依法购买并仅供个人使用的内容。</p></article><article><span>03</span><h3>按需连接 AI</h3><p>在设置页填写自己的接口地址、Key 和模型名，通过测试后启用高级反馈。</p></article></div>
+          <div class="notice legal-notice"><strong>版权边界</strong><p>项目本身不提供、抓取或引导下载商业题库。请不要公开分发你无权传播的题目、音频、范文或课程资料。</p></div>
+          <div class="button-row"><button class="button button-primary" data-route="home">返回学习中心</button><a class="button button-secondary" href="https://github.com/Duweiyu-97/EnglishLearnPath#readme" target="_blank" rel="noreferrer">阅读项目说明</a></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

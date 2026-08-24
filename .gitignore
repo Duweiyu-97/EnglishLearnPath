@@ -1,0 +1,26 @@
+# Build output
+/dist/
+/release/
+/launcher/EnglishLearnPath*
+*.exe
+
+# Local/private data
+/userdata/*
+!/userdata/.gitkeep
+*.env
+.env*
+*.key
+*.pem
+*.pfx
+*.wav
+*.mp3
+*.m4a
+*.webm
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
