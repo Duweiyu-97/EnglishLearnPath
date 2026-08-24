@@ -1,6 +1,6 @@
 # AI 配置说明
 
-EnglishLearnPath 的基础功能不依赖 AI。写作反馈和口语文字稿反馈只有在连接测试成功后才会启用。
+English Learning Path 的基础功能不依赖 AI。写作反馈和口语文字稿反馈只有在连接测试成功后才会启用。
 
 ## 云端 OpenAI 兼容 API
 
@@ -35,4 +35,3 @@ EnglishLearnPath 的基础功能不依赖 AI。写作反馈和口语文字稿反
 - 响应应包含 `choices[0].message.content`
 
 如果服务只支持完全不同的专有协议，需要自行添加适配器后才能使用。
-

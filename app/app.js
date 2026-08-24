@@ -1,7 +1,6 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "englishLearnPath.v1";
   const DEFAULT_STATE = {
     listening: [],
     reading: [],
@@ -20,7 +19,11 @@
     guide: ["START HERE", "使用指南"]
   };
 
-  let state = loadState();
+  let state = structuredClone(DEFAULT_STATE);
+  let diskReady = false;
+  let diskStatus = null;
+  let saveQueue = Promise.resolve();
+  let resourceCatalog = { listening: [], reading: [], warnings: [], listeningFolder: "", readingFolder: "" };
   let activeListeningId = null;
   let activeReadingId = null;
   let activeWritingId = null;
@@ -42,19 +45,84 @@
   const escapeHtml = (value = "") => String(value).replace(/[&<>'"]/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[char]);
   const normalized = value => String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
-  function loadState() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      return saved && typeof saved === "object" ? { ...DEFAULT_STATE, ...saved } : structuredClone(DEFAULT_STATE);
-    } catch {
-      return structuredClone(DEFAULT_STATE);
-    }
+  function normalizeState(value) {
+    const candidate = value && typeof value === "object" ? value : {};
+    return {
+      listening: Array.isArray(candidate.listening) ? candidate.listening : [],
+      reading: Array.isArray(candidate.reading) ? candidate.reading : [],
+      writings: Array.isArray(candidate.writings) ? candidate.writings : [],
+      speaking: Array.isArray(candidate.speaking) ? candidate.speaking : [],
+      activityDates: Array.isArray(candidate.activityDates) ? candidate.activityDates : []
+    };
   }
 
   function saveState(markActivity = false) {
     if (markActivity && !state.activityDates.includes(today())) state.activityDates.push(today());
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     renderMetrics();
+    const snapshot = structuredClone(state);
+    const task = saveQueue.catch(() => undefined).then(async () => {
+      const response = await fetch("/api/data", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data: snapshot })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "无法写入本地数据文件");
+      updateDiskStatus(result.storage);
+      return result;
+    });
+    saveQueue = task.catch(error => {
+      setStorageError(error.message);
+      return undefined;
+    });
+    return task;
+  }
+
+  async function loadStateFromDisk() {
+    try {
+      const response = await fetch("/api/data", { cache: "no-store" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "启动器没有返回数据");
+      state = normalizeState(result.data);
+      diskReady = true;
+      updateDiskStatus(result.storage);
+    } catch (error) {
+      diskReady = false;
+      setStorageError(`永久数据目录不可用：${error.message}`);
+      showToast("无法连接永久数据目录，请确认使用便携启动器打开");
+    }
+  }
+
+  function updateDiskStatus(status) {
+    if (!status) return;
+    diskStatus = status;
+    const bound = Boolean(status.bound ?? status.ready);
+    diskReady = bound;
+    const topBadge = $("#storageStatusBadge");
+    topBadge.textContent = bound ? "本地文件已连接" : "尚未选择数据目录";
+    topBadge.className = `status-badge storage-badge ${diskReady ? "status-on" : "status-off"}`;
+    $("#diskStatusBadge").textContent = bound ? "永久写盘" : "待选择";
+    $("#diskStatusBadge").className = `status-badge ${diskReady ? "status-on" : "status-off"}`;
+    $("#storageOnboarding").classList.toggle("hidden", bound);
+    $("#unboundStoragePrompt").classList.toggle("hidden", bound);
+    $("#boundStorageDetails").classList.toggle("hidden", !bound);
+    $("#openDataDirectory").disabled = !bound;
+    $("#writeDataNow").disabled = !bound;
+    $("#dataDirectoryPath").textContent = status.directory || "尚未选择";
+    $("#dataFileStatus").textContent = status.fileExists
+      ? `数据文件已建立${status.lastWriteAt ? ` · 最近写入 ${new Date(status.lastWriteAt).toLocaleString()}` : ""}`
+      : "数据文件将在第一次保存时建立";
+  }
+
+  function setStorageError(message) {
+    diskReady = false;
+    $("#storageStatusBadge").textContent = "数据写入失败";
+    $("#storageStatusBadge").className = "status-badge storage-badge status-off";
+    $("#diskStatusBadge").textContent = "异常";
+    $("#diskStatusBadge").className = "status-badge status-off";
+    const result = $("#storageResult");
+    result.className = "feedback-box is-error";
+    result.textContent = message;
   }
 
   function showToast(message) {
@@ -99,7 +167,7 @@
     const total = state.writings.length + state.speaking.length;
     $("#metricTotal").textContent = total;
     $("#metricWriting").textContent = state.writings.length;
-    $("#metricImports").textContent = state.listening.length + state.reading.length;
+    $("#metricImports").textContent = state.listening.length + state.reading.length + resourceCatalog.listening.length + resourceCatalog.reading.length;
     $("#metricStreak").textContent = calculateStreak();
   }
 
@@ -158,7 +226,7 @@
   const listeningExample = {
     title: "A Quiet Community Garden",
     description: "原创结构示例。请自行准备或录制与文本相符的音频。",
-    source: "EnglishLearnPath 原创示例",
+    source: "English Learning Path 原创示例",
     questions: [
       { prompt: "The garden opens at ______ on Saturday mornings.", answer: "eight", explanation: "示例答案用于演示核对流程；真实练习请配合你自己的音频。" },
       { prompt: "Volunteers should bring a pair of ______.", answer: "gloves", explanation: "填入一个复数名词。" }
@@ -167,8 +235,8 @@
 
   const readingExample = {
     title: "Why Small Routines Matter",
-    description: "EnglishLearnPath 原创短文，用于演示翻译、段意和解析的直接展示方式。",
-    source: "EnglishLearnPath 原创示例",
+    description: "English Learning Path 原创短文，用于演示翻译、段意和解析的直接展示方式。",
+    source: "English Learning Path 原创示例",
     paragraphs: [
       { label: "A", text: "People often imagine that progress arrives through dramatic decisions. In practice, modest routines can be more powerful because they reduce the effort needed to begin.", translation: "人们常以为进步来自重大的决定。实际上，微小的日常习惯可能更有力量，因为它们降低了开始行动所需的精力。", summary: "小习惯通过降低启动成本，往往比重大决定更能推动进步。" },
       { label: "B", text: "A learner who reads for ten minutes every evening may cover more material over a year than someone who waits for an entirely free weekend. Consistency turns a small action into a reliable system.", translation: "一个每天晚上阅读十分钟的学习者，一年下来可能比总在等待完整空闲周末的人读得更多。持续性会把一个微小行动变成可靠的系统。", summary: "长期的一致性能够把短时间投入累积成稳定成果。" }
@@ -178,6 +246,108 @@
       { prompt: "What does consistency turn a small action into?", answer: "A reliable system.", explanation: "定位 paragraph B 最后一句，turn A into B 的 B 即为答案。" }
     ]
   };
+
+  async function loadResourceCatalog(force = false) {
+    const buttons = [$("#rescanListening"), $("#rescanReading")];
+    if (force) {
+      buttons.forEach(button => { button.disabled = true; button.textContent = "正在解压并扫描……"; });
+    }
+    try {
+      const response = await fetch(force ? "/api/resources/rescan" : "/api/resources", { method: force ? "POST" : "GET", cache: "no-store" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "资源扫描失败");
+      resourceCatalog = {
+        listening: Array.isArray(result.listening) ? result.listening : [],
+        reading: Array.isArray(result.reading) ? result.reading : [],
+        warnings: Array.isArray(result.warnings) ? result.warnings : [],
+        listeningFolder: result.listeningFolder || "",
+        readingFolder: result.readingFolder || ""
+      };
+      renderResourceLibraries();
+      if (force) showToast(`扫描完成：虾滑听力 ${resourceCatalog.listening.length} 份，ZYZ 阅读 ${resourceCatalog.reading.length} 份`);
+      if (resourceCatalog.warnings.length) showToast(`扫描完成，但有 ${resourceCatalog.warnings.length} 个文件需要检查`);
+    } catch (error) {
+      showToast(`本地资源不可用：${error.message}`);
+    } finally {
+      buttons.forEach(button => { button.disabled = false; button.textContent = "重新扫描"; });
+    }
+  }
+
+  async function importResourceArchives(kind) {
+    if (!diskReady) {
+      routeTo("settings");
+      return showToast("请先选择永久数据文件夹");
+    }
+    const button = kind === "listening" ? $("#importListeningArchives") : $("#importReadingArchives");
+    const originalText = button.textContent;
+    button.disabled = true;
+    button.textContent = "请选择 ZIP……";
+    try {
+      const response = await fetch(`/api/resources/import?kind=${encodeURIComponent(kind)}`, { method: "POST" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "题库导入失败");
+      if (result.canceled) return;
+      const catalog = result.catalog || {};
+      resourceCatalog = {
+        listening: Array.isArray(catalog.listening) ? catalog.listening : [],
+        reading: Array.isArray(catalog.reading) ? catalog.reading : [],
+        warnings: Array.isArray(catalog.warnings) ? catalog.warnings : [],
+        listeningFolder: catalog.listeningFolder || "",
+        readingFolder: catalog.readingFolder || ""
+      };
+      renderResourceLibraries();
+      showToast(`已导入 ${result.imported || 0} 个新压缩包${result.skipped ? `，跳过 ${result.skipped} 个重复包` : ""}`);
+    } catch (error) {
+      showToast(error.message);
+    } finally {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+
+  function renderResourceLibraries() {
+    renderResourceList("listening", resourceCatalog.listening, "#listeningResourceLibrary", "#listeningResourceCount");
+    renderResourceList("reading", resourceCatalog.reading, "#readingResourceLibrary", "#readingResourceCount");
+    $("#listeningFolderPath").textContent = resourceCatalog.listeningFolder || "固定目录尚未就绪";
+    $("#readingFolderPath").textContent = resourceCatalog.readingFolder || "固定目录尚未就绪";
+    $("#settingsListeningPath").textContent = resourceCatalog.listeningFolder || "连接后显示";
+    $("#settingsReadingPath").textContent = resourceCatalog.readingFolder || "连接后显示";
+    renderMetrics();
+  }
+
+  function renderResourceList(kind, items, rootSelector, countSelector) {
+    const root = $(rootSelector);
+    $(countSelector).textContent = items.length;
+    if (!items.length) {
+      root.className = "library-list empty-state resource-list";
+      root.textContent = kind === "listening" ? "把虾滑 ZIP 或解压文件夹放入固定目录后点击扫描" : "把 ZYZ ZIP 或解压文件夹放入固定目录后点击扫描";
+      return;
+    }
+    root.className = "library-list resource-list";
+    root.innerHTML = items.map(item => `<button class="library-item" data-resource-id="${escapeHtml(item.id)}"><strong>${escapeHtml(item.title)}</strong><small>${escapeHtml(item.relativePath)}</small><span class="resource-item-badge">${escapeHtml(item.format)}</span></button>`).join("");
+    $$('[data-resource-id]', root).forEach(button => button.addEventListener("click", () => openLocalResource(button.dataset.resourceId)));
+  }
+
+  async function openLocalResource(id) {
+    try {
+      const response = await fetch("/api/resources/open", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "无法打开资源");
+      showToast("已使用本机默认程序打开资源");
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+
+  async function openResourceFolder(kind) {
+    try {
+      const response = await fetch(`/api/resources/open-directory?kind=${encodeURIComponent(kind)}`, { method: "POST" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "无法打开固定目录");
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
 
   function renderListeningLibrary() {
     const root = $("#listeningLibrary");
@@ -309,7 +479,7 @@
     renderWritingHistory();
   }
 
-  function saveWriting() {
+  async function saveWriting() {
     const prompt = $("#writingPrompt").value.trim();
     const essay = $("#writingEssay").value.trim();
     if (!prompt && !essay) return showToast("请先输入题目或正文");
@@ -324,7 +494,11 @@
     const index = state.writings.findIndex(entry => entry.id === record.id);
     if (index >= 0) state.writings[index] = record; else state.writings.push(record);
     activeWritingId = record.id;
-    saveState(true);
+    try {
+      await saveState(true);
+    } catch {
+      return showToast("写作未能写入本地文件，请检查数据目录");
+    }
     $("#deleteWriting").classList.remove("hidden");
     $("#saveStatus").textContent = `已保存 ${new Date().toLocaleTimeString()}`;
     renderWritingHistory();
@@ -539,11 +713,65 @@
       if (!incoming || !Array.isArray(incoming.writings) || !Array.isArray(incoming.listening)) throw new Error("不是有效的 EnglishLearnPath 备份");
       if (!confirm("导入备份会覆盖当前本机数据，是否继续？")) return;
       state = { ...DEFAULT_STATE, ...incoming };
-      saveState();
+      await saveState();
       renderAll();
       showToast("备份已导入");
     } catch (error) {
       showToast(`导入备份失败：${error.message}`);
+    }
+  }
+
+  async function selectDataDirectory() {
+    const resultBox = $("#storageResult");
+    resultBox.className = "feedback-box";
+    resultBox.textContent = "请在弹出的系统窗口中选择长期保存数据的文件夹……";
+    $("#selectDataDirectory").disabled = true;
+    $("#onboardingSelectDirectory").disabled = true;
+    try {
+      const response = await fetch("/api/data/select-directory", { method: "POST" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "无法绑定文件夹");
+      if (result.canceled) {
+        resultBox.textContent = "已取消选择，原数据目录保持不变。";
+        return;
+      }
+      state = normalizeState(result.data);
+      updateDiskStatus(result.storage);
+      renderAll();
+      newWriting();
+      await loadResourceCatalog(false);
+      resultBox.textContent = result.loadedExisting
+        ? "已绑定文件夹，并加载其中已有的 EnglishLearnPath 数据。原目录内容未删除。"
+        : "已绑定新文件夹，当前学习数据已复制到该目录。原目录内容仍保留。";
+      showToast("永久数据文件夹已绑定");
+    } catch (error) {
+      resultBox.classList.add("is-error");
+      resultBox.textContent = error.message;
+    } finally {
+      $("#selectDataDirectory").disabled = false;
+      $("#onboardingSelectDirectory").disabled = false;
+    }
+  }
+
+  async function openDataDirectory() {
+    try {
+      const response = await fetch("/api/data/open-directory", { method: "POST" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || "无法打开数据目录");
+    } catch (error) {
+      showToast(error.message);
+    }
+  }
+
+  async function writeDataNow() {
+    try {
+      await saveState();
+      const result = $("#storageResult");
+      result.className = "feedback-box";
+      result.textContent = `写入成功：${diskStatus?.dataFile || "本地数据文件"}`;
+      showToast("全部学习数据已写入磁盘");
+    } catch {
+      showToast("写入失败，请检查数据目录");
     }
   }
 
@@ -552,6 +780,7 @@
     renderListeningLibrary();
     renderReadingLibrary();
     renderWritingHistory();
+    renderResourceLibraries();
   }
 
   function bindEvents() {
@@ -561,16 +790,22 @@
     }));
     $("#menuButton").addEventListener("click", () => $(".sidebar").classList.toggle("is-open"));
     $("#exitApp").addEventListener("click", async () => {
-      if (!confirm("确定退出 EnglishLearnPath 吗？已保存的本地记录不会丢失。")) return;
+      if (!confirm("确定退出 English Learning Path 吗？已保存的本地记录不会丢失。")) return;
       try {
         await fetch("/api/app/shutdown", { method: "POST" });
-        document.body.innerHTML = '<main style="max-width:680px;margin:15vh auto;padding:40px;font-family:Segoe UI,sans-serif;color:#18332d"><h1>EnglishLearnPath 已退出</h1><p>现在可以关闭这个浏览器标签页。</p></main>';
+        document.body.innerHTML = '<main style="max-width:680px;margin:15vh auto;padding:40px;font-family:Segoe UI,sans-serif;color:#18332d"><h1>English Learning Path 已退出</h1><p>现在可以关闭这个浏览器标签页。</p></main>';
       } catch {
         showToast("当前不是通过便携启动器运行，无需退出服务");
       }
     });
     $("#listeningImport").addEventListener("change", event => importJson(event.target.files[0], "listening"));
     $("#readingImport").addEventListener("change", event => importJson(event.target.files[0], "reading"));
+    $("#openListeningFolder").addEventListener("click", () => openResourceFolder("listening"));
+    $("#openReadingFolder").addEventListener("click", () => openResourceFolder("reading"));
+    $("#importListeningArchives").addEventListener("click", () => importResourceArchives("listening"));
+    $("#importReadingArchives").addEventListener("click", () => importResourceArchives("reading"));
+    $("#rescanListening").addEventListener("click", () => loadResourceCatalog(true));
+    $("#rescanReading").addEventListener("click", () => loadResourceCatalog(true));
     $("#listeningExample").addEventListener("click", () => {
       const item = validateListening(listeningExample);
       state.listening.push(item); saveState(); renderListeningLibrary(); showListening(item.id);
@@ -613,17 +848,33 @@
     $("#disconnectAi").addEventListener("click", disconnectAi);
     $("#exportData").addEventListener("click", exportData);
     $("#importData").addEventListener("change", event => importBackup(event.target.files[0]));
-    $("#clearData").addEventListener("click", () => {
-      if (!confirm("这会永久清空当前浏览器中的所有学习记录。请先导出备份。确定继续吗？")) return;
-      localStorage.removeItem(STORAGE_KEY); state = structuredClone(DEFAULT_STATE); activeListeningId = activeReadingId = activeWritingId = null; renderAll(); newWriting(); showToast("本机学习数据已清空");
+    $("#selectDataDirectory").addEventListener("click", selectDataDirectory);
+    $("#onboardingSelectDirectory").addEventListener("click", selectDataDirectory);
+    $("#openDataDirectory").addEventListener("click", openDataDirectory);
+    $("#writeDataNow").addEventListener("click", writeDataNow);
+    $("#clearData").addEventListener("click", async () => {
+      if (!confirm("这会清空当前永久数据文件中的所有学习记录。程序会保留最近备份，但仍建议先导出。确定继续吗？")) return;
+      state = structuredClone(DEFAULT_STATE);
+      activeListeningId = activeReadingId = activeWritingId = null;
+      try {
+        await saveState();
+        renderAll(); newWriting(); showToast("永久数据文件已清空，滚动备份已保留");
+      } catch {
+        showToast("清空失败，原数据文件未被确认覆盖");
+      }
     });
     window.addEventListener("hashchange", () => routeTo(location.hash.slice(1)));
   }
 
-  bindEvents();
-  renderAll();
-  newWriting();
-  setAiConnected(false);
-  refreshAiStatus();
-  routeTo(location.hash.slice(1) || "home");
+  async function initialize() {
+    bindEvents();
+    setAiConnected(false);
+    await loadStateFromDisk();
+    renderAll();
+    newWriting();
+    await Promise.all([refreshAiStatus(), loadResourceCatalog(false)]);
+    routeTo(location.hash.slice(1) || "home");
+  }
+
+  initialize();
 })();

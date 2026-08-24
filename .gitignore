@@ -1,5 +1,6 @@
 # Build output
 /dist/
+/dist-test/
 /release/
 /launcher/EnglishLearnPath*
 *.exe
@@ -23,4 +24,3 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
-

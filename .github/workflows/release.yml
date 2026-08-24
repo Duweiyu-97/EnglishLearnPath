@@ -59,4 +59,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $zip = Get-ChildItem -LiteralPath dist -Filter *.zip | Select-Object -First 1
-          gh release create "${{ github.ref_name }}" $zip.FullName --title "EnglishLearnPath ${{ github.ref_name }}" --generate-notes
+          gh release create "${{ github.ref_name }}" $zip.FullName --title "English Learning Path ${{ github.ref_name }}" --generate-notes

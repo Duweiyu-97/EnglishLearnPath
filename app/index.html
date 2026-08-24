@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#16352f">
-  <meta name="description" content="EnglishLearnPath：本地优先、可自行导入材料的英语学习中心。">
-  <title>EnglishLearnPath · 英语学习路径</title>
+  <meta name="description" content="English Learning Path：本地优先、可自行导入材料的英语学习中心。">
+  <title>English Learning Path · 英语学习路径</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -13,7 +13,7 @@
     <aside class="sidebar" aria-label="主导航">
       <a class="brand" href="#home" data-route="home" aria-label="返回首页">
         <span class="brand-mark">EL</span>
-        <span><strong>EnglishLearnPath</strong><small>本地学习中心</small></span>
+        <span><strong>English Learning Path</strong><small>本地学习中心</small></span>
       </a>
       <nav class="nav-list">
         <button class="nav-item is-active" data-route="home"><span>⌂</span>学习概览</button>
@@ -24,7 +24,7 @@
       </nav>
       <div class="sidebar-footer">
         <button class="nav-item" data-route="settings"><span>⚙</span>AI 与数据设置</button>
-        <div class="privacy-note">你的练习记录默认只保存在当前设备。</div>
+        <div class="privacy-note">学习数据永久写入已绑定的本地文件夹，不依赖浏览器缓存。</div>
       </div>
     </aside>
 
@@ -36,6 +36,7 @@
           <h1 id="pageTitle">学习概览</h1>
         </div>
         <div class="topbar-actions">
+          <button id="storageStatusBadge" class="status-badge status-off storage-badge" data-route="settings">数据目录连接中</button>
           <span id="aiStatusBadge" class="status-badge status-off">AI 未连接</span>
           <button class="button button-quiet" data-route="settings">配置 AI</button>
           <button id="exitApp" class="button button-quiet" title="关闭本地启动器">退出</button>
@@ -81,11 +82,15 @@
       <section class="page" data-page="listening">
         <div class="page-intro panel compact-panel">
           <div><span class="kicker">LISTENING LAB</span><h2>听力练习</h2><p>本项目不附带题库或受版权保护的录音。导入你有权使用的材料，数据仅存本机。</p></div>
-          <div class="button-row"><label class="button button-secondary file-button">导入 JSON<input id="listeningImport" type="file" accept="application/json,.json"></label><button id="listeningExample" class="button button-quiet">加载原创示例</button></div>
+          <div class="button-row"><button id="importListeningArchives" class="button button-primary">导入或更新虾滑题库</button><button id="openListeningFolder" class="button button-secondary">打开虾滑目录</button><button id="rescanListening" class="button button-quiet">重新扫描</button><label class="button button-quiet file-button">导入 JSON<input id="listeningImport" type="file" accept="application/json,.json"></label><button id="listeningExample" class="button button-quiet">加载原创示例</button></div>
         </div>
         <div class="workspace-grid">
           <aside class="library panel">
-            <div class="panel-title"><h3>我的材料</h3><span id="listeningCount" class="count-pill">0</span></div>
+            <div class="panel-title"><h3>虾滑本地资源</h3><span id="listeningResourceCount" class="count-pill">0</span></div>
+            <p id="listeningFolderPath" class="folder-path">正在读取固定目录……</p>
+            <div id="listeningResourceLibrary" class="library-list empty-state resource-list">把虾滑压缩包放入固定目录后点击扫描</div>
+            <div class="library-divider"></div>
+            <div class="panel-title"><h3>自建 JSON 材料</h3><span id="listeningCount" class="count-pill">0</span></div>
             <div id="listeningLibrary" class="library-list empty-state">尚未导入听力材料</div>
           </aside>
           <div class="practice panel">
@@ -105,11 +110,15 @@
       <section class="page" data-page="reading">
         <div class="page-intro panel compact-panel">
           <div><span class="kicker">READING DESK</span><h2>阅读练习</h2><p>导入材料后，原文、翻译、段落大意和逐题解析会按文章直接展示，无需额外点击。</p></div>
-          <div class="button-row"><label class="button button-secondary file-button">导入 JSON<input id="readingImport" type="file" accept="application/json,.json"></label><button id="readingExample" class="button button-quiet">加载原创示例</button></div>
+          <div class="button-row"><button id="importReadingArchives" class="button button-primary">导入或更新 ZYZ 题库</button><button id="openReadingFolder" class="button button-secondary">打开 ZYZ 目录</button><button id="rescanReading" class="button button-quiet">重新扫描</button><label class="button button-quiet file-button">导入 JSON<input id="readingImport" type="file" accept="application/json,.json"></label><button id="readingExample" class="button button-quiet">加载原创示例</button></div>
         </div>
         <div class="workspace-grid reading-workspace">
           <aside class="library panel">
-            <div class="panel-title"><h3>我的文章</h3><span id="readingCount" class="count-pill">0</span></div>
+            <div class="panel-title"><h3>ZYZ 本地资源</h3><span id="readingResourceCount" class="count-pill">0</span></div>
+            <p id="readingFolderPath" class="folder-path">正在读取固定目录……</p>
+            <div id="readingResourceLibrary" class="library-list empty-state resource-list">把 ZYZ 压缩包放入固定目录后点击扫描</div>
+            <div class="library-divider"></div>
+            <div class="panel-title"><h3>自建 JSON 文章</h3><span id="readingCount" class="count-pill">0</span></div>
             <div id="readingLibrary" class="library-list empty-state">尚未导入阅读材料</div>
           </aside>
           <article class="practice panel reading-paper">
@@ -174,6 +183,17 @@
           <div><span class="kicker">PRIVATE BY DEFAULT</span><h2>AI 与数据设置</h2><p>基础功能无需 AI。只有完成连接测试后，写作与口语反馈按钮才会启用。</p></div>
         </div>
         <div class="settings-grid">
+          <section class="panel settings-card storage-card">
+            <div class="panel-title"><div><span class="kicker">PERMANENT LOCAL FILES</span><h3>永久本地数据目录</h3></div><span id="diskStatusBadge" class="status-badge status-off">连接中</span></div>
+            <p>题目、作文、练习记录和设置以 JSON 文件写入下面的文件夹。它不是浏览器缓存，清除浏览器数据或更换浏览器不会删除这些记录。</p>
+            <div id="unboundStoragePrompt" class="notice hidden"><strong>尚未选择数据文件夹</strong><p>第一次使用时，请选择一个长期保存的文件夹。选择已有 EnglishLearnPath 数据的目录会自动载入；选择空目录会创建新档案。</p></div>
+            <div id="boundStorageDetails" class="hidden">
+              <div class="path-card"><span>当前目录</span><code id="dataDirectoryPath">尚未选择</code><small id="dataFileStatus">尚未读取数据文件状态</small></div>
+              <div class="resource-paths"><div><strong>虾滑听力固定目录</strong><code id="settingsListeningPath">绑定后显示</code></div><div><strong>ZYZ 阅读固定目录</strong><code id="settingsReadingPath">绑定后显示</code></div></div>
+            </div>
+            <div class="button-row"><button id="selectDataDirectory" class="button button-primary">绑定或更换数据文件夹</button><button id="openDataDirectory" class="button button-secondary">在资源管理器中打开</button><button id="writeDataNow" class="button button-quiet">立即写入磁盘</button></div>
+            <div id="storageResult" class="feedback-box hidden"></div>
+          </section>
           <form id="aiSettings" class="panel settings-card">
             <div class="panel-title"><div><span class="kicker">OPENAI-COMPATIBLE</span><h3>AI 接口</h3></div><span id="settingsAiBadge" class="status-badge status-off">未连接</span></div>
             <label class="field"><span>接口地址</span><input id="aiBaseUrl" type="url" placeholder="https://api.openai.com/v1" autocomplete="off"><small>支持 OpenAI 兼容的云端 API 或本地模型服务。</small></label>
@@ -185,7 +205,7 @@
           </form>
           <div class="panel settings-card">
             <div class="panel-title"><div><span class="kicker">LOCAL DATA</span><h3>本地数据</h3></div></div>
-            <p>练习记录保存在浏览器的本地存储中。导出文件可用于备份或迁移；其中可能包含你的作文和练习材料，请妥善保管。</p>
+            <p>练习记录持续写入已绑定的本地文件夹。这里的导出文件用于额外备份或跨电脑迁移；其中可能包含你的作文和练习材料，请妥善保管。</p>
             <div class="stacked-actions"><button id="exportData" class="button button-secondary">导出全部数据</button><label class="button button-quiet file-button">导入备份<input id="importData" type="file" accept="application/json,.json"></label><button id="clearData" class="button button-danger-quiet">清空本机数据</button></div>
           </div>
         </div>
@@ -194,12 +214,22 @@
       <section class="page" data-page="guide">
         <div class="guide panel">
           <span class="kicker">START HERE</span><h2>三步开始使用</h2>
-          <div class="guide-steps"><article><span>01</span><h3>先练基础功能</h3><p>写作计时、录音回听以及自己材料的听阅练习都不需要网络或 AI。</p></article><article><span>02</span><h3>导入合法材料</h3><p>使用公开样题、自己创作的材料，或你依法购买并仅供个人使用的内容。</p></article><article><span>03</span><h3>按需连接 AI</h3><p>在设置页填写自己的接口地址、Key 和模型名，通过测试后启用高级反馈。</p></article></div>
+          <div class="guide-steps"><article><span>01</span><h3>绑定本地目录</h3><p>首次启动已有默认数据目录，也可以换成自己的长期文件夹。所有记录直接写入磁盘。</p></article><article><span>02</span><h3>放入合法资源</h3><p>把虾滑听力或 ZYZ 阅读压缩包放到程序显示的固定目录，点击扫描即可接入。</p></article><article><span>03</span><h3>按需连接 AI</h3><p>在设置页填写自己的接口地址、Key 和模型名，通过测试后启用高级反馈。</p></article></div>
           <div class="notice legal-notice"><strong>版权边界</strong><p>项目本身不提供、抓取或引导下载商业题库。请不要公开分发你无权传播的题目、音频、范文或课程资料。</p></div>
           <div class="button-row"><button class="button button-primary" data-route="home">返回学习中心</button><a class="button button-secondary" href="https://github.com/Duweiyu-97/EnglishLearnPath#readme" target="_blank" rel="noreferrer">阅读项目说明</a></div>
         </div>
       </section>
     </main>
+  </div>
+  <div id="storageOnboarding" class="onboarding-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
+    <section class="onboarding-card">
+      <span class="kicker">FIRST START</span>
+      <h2 id="onboardingTitle">先选择永久数据文件夹</h2>
+      <p>English Learning Path 不把学习档案存进浏览器缓存。请选择一个长期保留的本地文件夹，题目、作文和练习记录都会直接写入其中。</p>
+      <div class="onboarding-options"><div><span>新用户</span><strong>选择或新建空文件夹</strong><small>程序会建立数据文件与虾滑、ZYZ 两个资源目录。</small></div><div><span>已有数据</span><strong>选择以前绑定的文件夹</strong><small>检测到 <code>EnglishLearnPath-data.json</code> 后自动恢复。</small></div></div>
+      <button id="onboardingSelectDirectory" class="button button-primary">选择或创建文件夹</button>
+      <small class="onboarding-footnote">完成选择前不会显示路径，也不会把练习记录写入浏览器缓存。</small>
+    </section>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
