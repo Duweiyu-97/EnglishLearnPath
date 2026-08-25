@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -158,7 +157,7 @@ func main() {
 
 func registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/app/info", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"name": "English Learning Path", "version": "0.3.0", "local": true})
+		writeJSON(w, http.StatusOK, map[string]any{"name": "English Learning Path", "version": "0.3.1", "local": true})
 	})
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "app": "EnglishLearnPath"})
@@ -984,47 +983,6 @@ func discoverResources(root, kind string) ([]resourceItem, []string) {
 	return result, warnings
 }
 
-func selectArchiveFiles(kind string) ([]string, bool, error) {
-	if runtime.GOOS != "windows" {
-		return nil, false, errors.New("当前版本只支持 Windows 文件选择器")
-	}
-	label := "虾滑听力"
-	if kind == "reading" {
-		label = "ZYZ 阅读"
-	}
-	script := fmt.Sprintf(`$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.OpenFileDialog
-$dialog.Title = '选择%s ZIP，可多选'
-$dialog.Filter = 'ZIP 压缩包 (*.zip)|*.zip'
-$dialog.Multiselect = $true
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-  foreach ($name in $dialog.FileNames) {
-    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($name))
-  }
-} else {
-  'CANCELLED'
-}`, label)
-	command := exec.Command("powershell.exe", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		return nil, false, err
-	}
-	lines := strings.Fields(string(output))
-	if len(lines) == 0 || (len(lines) == 1 && lines[0] == "CANCELLED") {
-		return nil, true, nil
-	}
-	paths := make([]string, 0, len(lines))
-	for _, encoded := range lines {
-		decoded, err := base64.StdEncoding.DecodeString(encoded)
-		if err != nil {
-			return nil, false, errors.New("无法解析所选压缩包路径")
-		}
-		paths = append(paths, string(decoded))
-	}
-	return paths, false, nil
-}
-
 func importResourceArchives(kind string, selected []string) (int, int, error) {
 	destination, err := resourceDirectory(kind)
 	if err != nil {
@@ -1137,36 +1095,6 @@ func copyFile(sourcePath, targetPath string) error {
 		return err
 	}
 	return nil
-}
-
-func selectDirectory() (string, bool, error) {
-	if runtime.GOOS != "windows" {
-		return "", false, errors.New("当前版本只支持 Windows 文件夹选择器")
-	}
-	script := `$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
-Add-Type -AssemblyName System.Windows.Forms
-$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-$dialog.Description = '选择 EnglishLearnPath 永久数据文件夹'
-$dialog.ShowNewFolderButton = $true
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
-  [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($dialog.SelectedPath))
-} else {
-  'CANCELLED'
-}`
-	command := exec.Command("powershell.exe", "-NoProfile", "-STA", "-WindowStyle", "Hidden", "-Command", script)
-	output, err := command.CombinedOutput()
-	if err != nil {
-		return "", false, fmt.Errorf("%w", err)
-	}
-	encoded := strings.TrimSpace(string(output))
-	if encoded == "" || encoded == "CANCELLED" {
-		return "", true, nil
-	}
-	decoded, err := base64.StdEncoding.DecodeString(encoded)
-	if err != nil {
-		return "", false, errors.New("无法解析所选文件夹路径")
-	}
-	return string(decoded), false, nil
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
