@@ -3,9 +3,12 @@ package main
 import (
 	"archive/zip"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -52,6 +55,87 @@ func TestUnboundDiskStoreDoesNotWrite(t *testing.T) {
 	loaded, err := store.load()
 	if err != nil || string(loaded) != "{}" {
 		t.Fatalf("unbound load should be empty: %s, %v", loaded, err)
+	}
+}
+
+func TestNewDiskStoreUsesIsolatedConfigAndStartsUnbound(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("ENGLISH_LEARN_PATH_CONFIG_DIR", configRoot)
+
+	store, err := newDiskStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.configPath != filepath.Join(configRoot, "config.json") {
+		t.Fatalf("unexpected config path: %s", store.configPath)
+	}
+	if store.directoryPath() != "" {
+		t.Fatalf("fresh portable config should be unbound: %s", store.directoryPath())
+	}
+}
+
+func TestNewDiskStoreDoesNotRecreateStaleDirectory(t *testing.T) {
+	configRoot := t.TempDir()
+	missingDirectory := filepath.Join(t.TempDir(), "old-computer", "userdata")
+	payload, err := json.Marshal(launcherConfig{DataDirectory: missingDirectory})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configRoot, "config.json"), payload, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ENGLISH_LEARN_PATH_CONFIG_DIR", configRoot)
+
+	store, err := newDiskStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.directoryPath() != "" {
+		t.Fatalf("stale directory should not be loaded: %s", store.directoryPath())
+	}
+	if _, err := os.Stat(missingDirectory); !os.IsNotExist(err) {
+		t.Fatalf("stale directory must not be recreated: %v", err)
+	}
+}
+
+func TestSelectedDirectoryPersistsAcrossRestarts(t *testing.T) {
+	configRoot := t.TempDir()
+	dataRoot := t.TempDir()
+	t.Setenv("ENGLISH_LEARN_PATH_CONFIG_DIR", configRoot)
+
+	first, err := newDiskStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedExisting, err := first.switchDirectory(dataRoot); err != nil {
+		t.Fatal(err)
+	} else if loadedExisting {
+		t.Fatal("fresh directory should not be reported as existing data")
+	}
+
+	second, err := newDiskStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.directoryPath() != dataRoot {
+		t.Fatalf("selected directory was not restored: %s", second.directoryPath())
+	}
+	if _, err := os.Stat(filepath.Join(dataRoot, dataFilename)); err != nil {
+		t.Fatalf("data file was not created: %v", err)
+	}
+}
+
+func TestSecurityHeadersAllowLocalImagePreviewBlobs(t *testing.T) {
+	handler := securityHeaders(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	policy := response.Header().Get("Content-Security-Policy")
+	if !strings.Contains(policy, "img-src 'self' data: blob:") {
+		t.Fatalf("image previews created from local files need blob CSP support: %s", policy)
 	}
 }
 

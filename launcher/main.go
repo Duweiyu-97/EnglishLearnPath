@@ -25,13 +25,12 @@ import (
 )
 
 const (
-	address       = "127.0.0.1:17860"
-	appURL        = "http://127.0.0.1:17860"
 	maxRequest    = 1 << 20
 	maxAIResponse = 4 << 20
-	maxDataFile   = 32 << 20
+	maxDataFile   = 128 << 20
 	dataFilename  = "EnglishLearnPath-data.json"
 	backupName    = "EnglishLearnPath-data.backup.json"
+	configDirname = "runtime-data"
 )
 
 type aiConfig struct {
@@ -123,15 +122,15 @@ func main() {
 		return
 	}
 
-	listener, err := net.Listen("tcp", address)
+	// Let Windows assign a free loopback port. A fixed port can make a newly
+	// extracted copy open an older copy that is already running, which would
+	// expose that copy's local settings in the browser.
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		if existingAppIsRunning() {
-			_ = openBrowser(appURL)
-			return
-		}
 		writeStartupError(fmt.Errorf("无法启动本地服务：%w", err))
 		return
 	}
+	appURL := "http://" + listener.Addr().String()
 
 	mux := http.NewServeMux()
 	registerAPI(mux)
@@ -159,7 +158,7 @@ func main() {
 
 func registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/app/info", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"name": "English Learning Path", "version": "0.2.0", "local": true})
+		writeJSON(w, http.StatusOK, map[string]any{"name": "English Learning Path", "version": "0.3.0", "local": true})
 	})
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "app": "EnglishLearnPath"})
@@ -526,17 +525,18 @@ func validateConfig(cfg aiConfig) error {
 }
 
 func newDiskStore() (*diskStore, error) {
-	configRoot, err := os.UserConfigDir()
-	if err != nil || strings.TrimSpace(configRoot) == "" {
-		configRoot = os.TempDir()
-	}
+	var configRoot string
 	if override := strings.TrimSpace(os.Getenv("ENGLISH_LEARN_PATH_CONFIG_DIR")); override != "" {
 		configRoot = override
 	} else {
-		configRoot = filepath.Join(configRoot, "EnglishLearnPath")
+		executable, err := os.Executable()
+		if err != nil {
+			return nil, fmt.Errorf("无法定位启动器目录：%w", err)
+		}
+		configRoot = filepath.Join(filepath.Dir(executable), configDirname)
 	}
 	if err := os.MkdirAll(configRoot, 0700); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("无法创建便携配置目录 %s：%w", configRoot, err)
 	}
 
 	store := &diskStore{
@@ -545,13 +545,16 @@ func newDiskStore() (*diskStore, error) {
 	if raw, readErr := os.ReadFile(store.configPath); readErr == nil {
 		var saved launcherConfig
 		if json.Unmarshal(raw, &saved) == nil && filepath.IsAbs(saved.DataDirectory) {
-			store.directory = filepath.Clean(saved.DataDirectory)
+			candidate := filepath.Clean(saved.DataDirectory)
+			// Never recreate a stale absolute path copied from another computer.
+			// A missing directory means this portable copy starts unbound and asks
+			// the current user to choose a local folder again.
+			if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
+				store.directory = candidate
+			}
 		}
 	}
 	if store.directory != "" {
-		if err := os.MkdirAll(store.directory, 0700); err != nil {
-			return nil, err
-		}
 		for _, name := range []string{"Listening-Xiahua", "Reading-ZYZ"} {
 			if err := os.MkdirAll(filepath.Join(store.directory, "resources", name), 0700); err != nil {
 				return nil, err
@@ -1193,7 +1196,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("Permissions-Policy", "camera=(), geolocation=(), microphone=(self)")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; style-src 'self'; script-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -1215,17 +1218,6 @@ func findResourceDir(name string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("找不到 %s 资源目录，请确认程序已完整解压", name)
-}
-
-func existingAppIsRunning() bool {
-	probe := &http.Client{Timeout: 800 * time.Millisecond}
-	response, err := probe.Get(appURL + "/api/health")
-	if err != nil {
-		return false
-	}
-	defer response.Body.Close()
-	var data map[string]any
-	return response.StatusCode == http.StatusOK && json.NewDecoder(response.Body).Decode(&data) == nil && data["app"] == "EnglishLearnPath"
 }
 
 func openBrowser(target string) error {

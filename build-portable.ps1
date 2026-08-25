@@ -31,6 +31,27 @@ Copy-Item -LiteralPath (Join-Path $RepoRoot "docs") -Destination (Join-Path $Pac
 Copy-Item -LiteralPath (Join-Path $RepoRoot "README.md") -Destination $PackageRoot
 Copy-Item -LiteralPath (Join-Path $RepoRoot "LICENSE") -Destination $PackageRoot
 
+# Fail closed if a developer runtime file or an absolute developer path ever
+# slips into a release. The portable app creates runtime-data only after launch.
+$PrivateRuntimeFiles = Get-ChildItem -LiteralPath $PackageRoot -Recurse -Force -File | Where-Object {
+    $_.FullName -match '[\\/](userdata|runtime-data)[\\/]' -or
+    $_.Name -in @('config.json', 'EnglishLearnPath-data.json', 'EnglishLearnPath-data.backup.json')
+}
+if ($PrivateRuntimeFiles) {
+    $Names = ($PrivateRuntimeFiles.FullName -join [Environment]::NewLine)
+    throw "发布包包含本地运行数据，已停止构建：`n$Names"
+}
+
+$TextFiles = Get-ChildItem -LiteralPath $PackageRoot -Recurse -File | Where-Object {
+    $_.Extension -in @('.md', '.html', '.css', '.js', '.json', '.txt')
+}
+foreach ($File in $TextFiles) {
+    $Content = Get-Content -LiteralPath $File.FullName -Raw
+    if ($Content -match '(?i)[A-Z]:\\(?:Users|summary)\\') {
+        throw "发布包包含开发机绝对路径，已停止构建：$($File.FullName)"
+    }
+}
+
 $ZipPath = Join-Path $OutputRoot "EnglishLearnPath-Windows-x64-$Version.zip"
 Compress-Archive -LiteralPath $PackageRoot -DestinationPath $ZipPath -CompressionLevel Optimal
 Write-Output $ZipPath

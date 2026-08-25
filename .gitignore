@@ -8,6 +8,8 @@
 # Local/private data
 /userdata/*
 !/userdata/.gitkeep
+/runtime-data/
+**/runtime-data/
 *.env
 .env*
 *.key

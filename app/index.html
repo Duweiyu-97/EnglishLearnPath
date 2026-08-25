@@ -21,6 +21,8 @@
         <button class="nav-item" data-route="reading"><span>▤</span>阅读练习</button>
         <button class="nav-item" data-route="writing"><span>✎</span>写作工坊</button>
         <button class="nav-item" data-route="speaking"><span>◎</span>口语练习</button>
+        <button class="nav-item" data-route="plan"><span>✓</span>学习计划</button>
+        <button class="nav-item" data-route="mistakes"><span>◇</span>错题与复盘</button>
       </nav>
       <div class="sidebar-footer">
         <button class="nav-item" data-route="settings"><span>⚙</span>AI 与数据设置</button>
@@ -69,6 +71,11 @@
           <article class="metric-card"><span>导入材料</span><strong id="metricImports">0</strong><small>听力与阅读</small></article>
           <article class="metric-card"><span>连续学习</span><strong id="metricStreak">0</strong><small>天</small></article>
         </div>
+
+        <section class="today-plan panel">
+          <div class="panel-title"><div><span class="kicker">TODAY'S ACTIONS</span><h3>今日学习计划</h3><p id="todayPlanMeta">配置考试目标后，这里会生成可执行任务。</p></div><button class="button button-secondary" data-route="plan">配置计划</button></div>
+          <div id="todayPlanList" class="today-task-list empty-state">尚未创建学习计划</div>
+        </section>
 
         <div class="section-heading"><div><span class="kicker">FOUR SKILLS</span><h2>选择一条练习路径</h2></div></div>
         <div class="skill-grid">
@@ -148,7 +155,7 @@
             <label class="field"><span>题目</span><textarea id="writingPrompt" rows="3" placeholder="粘贴或输入你有权使用的题目……"></textarea></label>
             <label class="field essay-field"><span>正文</span><textarea id="writingEssay" placeholder="Start writing here..." spellcheck="true"></textarea></label>
             <div class="editor-footer"><span><strong id="wordCount">0</strong> words</span><span id="saveStatus">尚未保存</span></div>
-            <div class="button-row"><button id="saveWriting" class="button button-primary">保存到本机</button><button id="reviewWriting" class="button button-secondary ai-required">AI 写作反馈</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div>
+            <div class="button-row"><button id="saveWriting" class="button button-primary">保存到本机</button><button id="reviewWriting" class="button button-secondary ai-required">AI 写作反馈</button><button id="addWritingMistake" class="button button-quiet">加入写作复盘本</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div>
             <div id="writingReview" class="ai-output hidden"></div>
           </div>
         </div>
@@ -157,6 +164,7 @@
       <section class="page" data-page="speaking">
         <div class="page-intro panel compact-panel">
           <div><span class="kicker">SPEAKING ROOM</span><h2>口语练习</h2><p>输入自己的话题，使用浏览器录音并回听。当前通用 AI 接口只分析你粘贴的文字稿，不会自动上传录音。</p></div>
+          <button id="newSpeaking" class="button button-primary">新建口语练习</button>
         </div>
         <div class="speaking-grid">
           <div class="panel speaking-recorder">
@@ -171,10 +179,68 @@
           </div>
           <div class="panel transcript-panel">
             <div class="panel-title"><div><span class="kicker">TRANSCRIPT</span><h3>文字稿与复盘</h3></div></div>
+            <div class="transcription-toolbar"><label class="mini-field"><span>题型</span><select id="speakingPart"><option value="p1">Part 1</option><option value="p2">Part 2</option><option value="p3">Part 3</option><option value="free">自由表达</option></select></label><label class="mini-field"><span>转写语言</span><select id="speechLanguage"><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option></select></label><button id="browserTranscribe" class="button button-secondary">开始浏览器转写</button></div>
+            <p class="privacy-hint">浏览器语音转写不使用你配置的 AI 接口；Chrome/Edge 可能按自身规则将音频发送给浏览器厂商的语音服务。</p>
             <textarea id="speakingTranscript" class="transcript-area" placeholder="把你说的内容整理或粘贴到这里。这样即使只有文字 API，也能进行表达、语法与结构反馈。"></textarea>
-            <div class="button-row"><button id="saveSpeaking" class="button button-primary">保存练习</button><button id="reviewSpeaking" class="button button-secondary ai-required">AI 口语反馈</button></div>
+            <div class="button-row"><button id="saveSpeaking" class="button button-primary">保存练习</button><button id="reviewSpeaking" class="button button-secondary ai-required">AI 评价与修改</button><button id="addSpeakingMistake" class="button button-quiet">加入口语复盘本</button><button id="deleteSpeaking" class="button button-danger-quiet hidden">删除记录</button></div>
             <div id="speakingReview" class="ai-output hidden"></div>
           </div>
+        </div>
+        <section class="panel speaking-history-panel">
+          <div class="panel-title"><div><span class="kicker">LOCAL HISTORY</span><h3>口语练习记录</h3></div><span id="speakingCount" class="count-pill">0</span></div>
+          <div id="speakingHistory" class="library-list empty-state">还没有口语练习记录</div>
+        </section>
+      </section>
+
+      <section class="page" data-page="plan">
+        <div class="page-intro panel compact-panel"><div><span class="kicker">GOAL TO ACTION</span><h2>学习计划</h2><p>把考试日期、当前水平和重点转成每天可点击的具体任务。AI 只负责生成建议，所有计划与打卡仍写入你的本地数据文件。</p></div></div>
+        <div class="plan-layout">
+          <form id="planProfile" class="panel plan-card">
+            <div class="panel-title"><div><span class="kicker">YOUR TARGET</span><h3>目标与时间</h3></div></div>
+            <div class="form-grid two-columns">
+              <label class="field"><span>预计考试日期</span><input id="planExamDate" type="date" required></label>
+              <label class="field"><span>每日可学习时间（分钟）</span><input id="planDailyMinutes" type="number" min="15" max="720" value="180"></label>
+              <label class="field"><span>现有水平</span><input id="planCurrentLevel" type="text" placeholder="例如：总分 6.0，阅读 6.5，听力 5.5" required></label>
+              <label class="field"><span>目标水平</span><input id="planTargetLevel" type="text" placeholder="例如：总分 7.0，单项不低于 6.5" required></label>
+            </div>
+            <label class="field"><span>重点与补充信息</span><textarea id="planFocus" rows="4" placeholder="例如：重点提升听力填空和写作论证；周末时间更多；希望每周完整模考一次……"></textarea></label>
+            <div class="manual-targets">
+              <h4>手动计划：每天完成</h4>
+              <label><span>听力</span><input id="manualListening" type="number" min="0" max="10" value="1"><small>篇</small></label>
+              <label><span>阅读</span><input id="manualReading" type="number" min="0" max="10" value="1"><small>篇</small></label>
+              <label><span>写作</span><input id="manualWriting" type="number" min="0" max="5" value="1"><small>篇</small></label>
+              <label><span>口语</span><input id="manualSpeaking" type="number" min="0" max="10" value="1"><small>次</small></label>
+              <label><span>错题复盘</span><input id="manualReview" type="number" min="0" max="240" value="30"><small>分钟</small></label>
+            </div>
+            <div class="button-row"><button id="saveManualPlan" type="button" class="button button-primary">保存手动计划</button><button id="generateAiPlan" type="button" class="button button-secondary ai-required">AI 生成七日计划</button></div>
+            <div id="planResult" class="feedback-box hidden"></div>
+          </form>
+          <section class="panel plan-card">
+            <div class="panel-title"><div><span class="kicker">WEEKLY RHYTHM</span><h3>当前计划</h3></div><span id="planSourceBadge" class="status-badge status-off">未创建</span></div>
+            <div id="planSummary" class="plan-summary empty-state">先在左侧填写目标，然后手动保存或让 AI 生成。</div>
+            <div id="weeklyPlan" class="weekly-plan"></div>
+            <div class="button-row"><button id="deletePlan" type="button" class="button button-danger-quiet hidden">删除当前计划</button></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="page" data-page="mistakes">
+        <div class="page-intro panel compact-panel"><div><span class="kicker">REVIEW & IMPROVE</span><h2>错题与复盘</h2><p>听、读、写、说分别整理。可以粘贴文字，也可以在文本框中直接 Ctrl+V 粘贴剪贴板图片；图片压缩后只写入你绑定的本地数据文件。</p></div></div>
+        <div class="mistake-layout">
+          <form id="mistakeForm" class="panel mistake-composer">
+            <div class="panel-title"><div><span class="kicker">NEW NOTE</span><h3>新增错题 / 复盘</h3></div></div>
+            <label class="field"><span>所属模块</span><select id="mistakeModule"><option value="listening">听力</option><option value="reading">阅读</option><option value="writing">写作</option><option value="speaking">口语</option></select></label>
+            <label class="field"><span>标题</span><input id="mistakeTitle" type="text" placeholder="例如：同义替换没有识别"></label>
+            <label class="field"><span>问题、原因与下次优化</span><textarea id="mistakeText" rows="9" placeholder="可以输入或粘贴文本；复制截图后在这里按 Ctrl+V，即可把图片附在这条记录中。"></textarea></label>
+            <label class="button button-quiet file-button">选择图片<input id="mistakeImageInput" type="file" accept="image/*" multiple></label>
+            <div id="mistakeImagePreview" class="mistake-image-preview empty-state">尚未添加图片</div>
+            <div class="button-row"><button type="submit" class="button button-primary">保存到错题本</button><button id="resetMistakeForm" type="button" class="button button-quiet">清空编辑区</button></div>
+          </form>
+          <section class="panel mistake-library">
+            <div class="panel-title"><div><span class="kicker">LOCAL NOTEBOOK</span><h3>四科错题本</h3></div><span id="mistakeCount" class="count-pill">0</span></div>
+            <div class="mistake-filters"><button class="button button-secondary is-active" data-mistake-filter="all">全部</button><button class="button button-quiet" data-mistake-filter="listening">听力</button><button class="button button-quiet" data-mistake-filter="reading">阅读</button><button class="button button-quiet" data-mistake-filter="writing">写作</button><button class="button button-quiet" data-mistake-filter="speaking">口语</button></div>
+            <div id="mistakeList" class="mistake-list empty-state">还没有错题或复盘记录</div>
+          </section>
         </div>
       </section>
 
@@ -196,10 +262,11 @@
           </section>
           <form id="aiSettings" class="panel settings-card">
             <div class="panel-title"><div><span class="kicker">OPENAI-COMPATIBLE</span><h3>AI 接口</h3></div><span id="settingsAiBadge" class="status-badge status-off">未连接</span></div>
-            <label class="field"><span>接口地址</span><input id="aiBaseUrl" type="url" placeholder="https://api.openai.com/v1" autocomplete="off"><small>支持 OpenAI 兼容的云端 API 或本地模型服务。</small></label>
+            <label class="field"><span>服务商预设</span><select id="aiProvider"><option value="deepseek" selected>DeepSeek（已有 DeepSeek Key 选这个）</option><option value="openai">OpenAI</option><option value="ollama">本地模型（Ollama 兼容）</option><option value="custom">其他 OpenAI 兼容服务</option></select><small>选择后会自动填写接口地址和建议模型；仍可手动修改。</small></label>
+            <label class="field"><span>接口地址</span><input id="aiBaseUrl" type="url" value="https://api.deepseek.com" placeholder="https://api.deepseek.com" autocomplete="off"><small id="aiProviderHelp">DeepSeek 官方 OpenAI 兼容地址。程序会自动请求 /chat/completions。</small></label>
             <label class="field"><span>API Key</span><input id="aiApiKey" type="password" placeholder="仅在本次启动期间保存在内存中" autocomplete="off"><small>不会写入浏览器存储、配置文件或 Git 仓库。</small></label>
-            <label class="field"><span>模型名称</span><input id="aiModel" type="text" placeholder="例如：gpt-4.1-mini 或本地模型名" autocomplete="off"></label>
-            <div class="notice"><strong>本地模型提示</strong><p>填写本地服务提供的 OpenAI 兼容地址，例如 <code>http://127.0.0.1:11434/v1</code>。本项目不捆绑模型，模型需要由使用者自行安装和启动。</p></div>
+            <label class="field"><span>模型名称</span><input id="aiModel" type="text" value="deepseek-v4-flash" placeholder="例如：deepseek-v4-flash" autocomplete="off"></label>
+            <div class="notice"><strong>DeepSeek 怎么填？</strong><p>只有 DeepSeek API Key 时，选择上面的 DeepSeek 预设即可：接口地址为 <code>https://api.deepseek.com</code>，建议模型为 <code>deepseek-v4-flash</code>。模型名称可能随服务商更新，请以官方文档为准。</p></div>
             <div class="button-row"><button type="submit" class="button button-primary">保存并测试连接</button><button id="disconnectAi" type="button" class="button button-quiet">断开</button></div>
             <div id="aiTestResult" class="feedback-box hidden"></div>
           </form>
@@ -214,7 +281,7 @@
       <section class="page" data-page="guide">
         <div class="guide panel">
           <span class="kicker">START HERE</span><h2>三步开始使用</h2>
-          <div class="guide-steps"><article><span>01</span><h3>绑定本地目录</h3><p>首次启动已有默认数据目录，也可以换成自己的长期文件夹。所有记录直接写入磁盘。</p></article><article><span>02</span><h3>放入合法资源</h3><p>把虾滑听力或 ZYZ 阅读压缩包放到程序显示的固定目录，点击扫描即可接入。</p></article><article><span>03</span><h3>按需连接 AI</h3><p>在设置页填写自己的接口地址、Key 和模型名，通过测试后启用高级反馈。</p></article></div>
+          <div class="guide-steps"><article><span>01</span><h3>绑定本地目录</h3><p>首次启动先选择自己的长期数据文件夹，所有记录直接写入磁盘。</p></article><article><span>02</span><h3>放入合法资源</h3><p>把虾滑听力或 ZYZ 阅读压缩包放到程序显示的固定目录，点击扫描即可接入。</p></article><article><span>03</span><h3>按需连接 AI</h3><p>在设置页选择服务商预设，填写自己的 Key 并测试连接，即可启用高级反馈。</p></article></div>
           <div class="notice legal-notice"><strong>版权边界</strong><p>项目本身不提供、抓取或引导下载商业题库。请不要公开分发你无权传播的题目、音频、范文或课程资料。</p></div>
           <div class="button-row"><button class="button button-primary" data-route="home">返回学习中心</button><a class="button button-secondary" href="https://github.com/Duweiyu-97/EnglishLearnPath#readme" target="_blank" rel="noreferrer">阅读项目说明</a></div>
         </div>
