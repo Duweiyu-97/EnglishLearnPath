@@ -1,5 +1,12 @@
 # 维护记录
 
+## 2026-09-04：GitHub 完整包构建环境不匹配
+
+- 失败运行 33846195753：前端和 Go 检查通过，CMake 报 `Visual Studio 17 2022 could not find any instance of Visual Studio`。
+- 根因：`windows-latest` 已指向 `windows-2025-vs2026`，但本地验证过的 Whisper 构建脚本使用 VS 2022 生成器；不是用户依赖、数据或 API 配置问题。
+- 处理：CI 固定 `windows-2022`（含 VS 2022），保留原有静态链接与 DLL 校验，设置 30 分钟构建上限。此次只修复构建配置，不修改本地数据、不发布新版本标签。
+- 验证标准：必须在 GitHub 干净 runner 上完成源码编译、模型校验、完整 ZIP 生成和 artifact 上传；不能仅以本机构建成功代替云端验证。
+
 ## 2026-09-04：完整离线转写包与紧凑删除按钮
 
 - 完整 ZIP 内置静态 CPU 版 whisper.cpp 与 small.en 英语模型，录音结束后通过本机回环服务转写；不调用文字 AI 接口、不上传音频。浏览器实时转写保留为用户可选模式。

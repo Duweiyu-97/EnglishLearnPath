@@ -24,3 +24,4 @@ When the user corrects an implementation or workflow, fix the current issue and 
 [UI] Keep answer editing separate from saved report presentation; hide conversational preambles and avoid repeating corrections already displayed as annotation cards.
 [UI] Place compact delete controls inside the top-right of history and notebook cards, reserving title space and overriding generic button height so controls never overlap text or stretch with the header.
 [CODE] Match review quotations across typographic hyphen, quote and whitespace variants using offsets into the untouched source; reject ambiguous or lexically different matches rather than inventing a location.
+[WORKFLOW] Pin CI runner families to required compiler generations and verify the entire remote build and artifact upload before calling CI fixed; a local build does not validate a moving hosted image.
