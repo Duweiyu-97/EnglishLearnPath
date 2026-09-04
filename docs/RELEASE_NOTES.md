@@ -1,4 +1,6 @@
-# 完整离线语音版
+# v0.4.0 · 完整离线语音版
+
+本版专注写作与口语：包含独立 Markdown 批改页、原文修改标注与双向定位、录音和文字稿共同保存、学习计划、错题/单词本，以及本地加密保存 API 配置。听力、阅读题库不再内置或适配。
 
 下载 **EnglishLearnPath-Windows-x64-Full-*.zip**，全部解压到有写入权限的普通文件夹，双击“启动学习中心.exe”。不要只下载 GitHub 的 Source code ZIP。Windows 10/11 x64；使用系统自带 Edge 或现代 Chrome；无需安装 Python、FFmpeg、VC 运行库或另外下载语音模型。
 

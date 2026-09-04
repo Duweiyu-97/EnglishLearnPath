@@ -143,7 +143,7 @@ func main() {
 
 func registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/app/info", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"name": "English Learning Path", "version": "0.4.0-preview", "local": true})
+		writeJSON(w, http.StatusOK, map[string]any{"name": "English Learning Path", "version": "0.4.0", "local": true})
 	})
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "app": "EnglishLearnPath"})
