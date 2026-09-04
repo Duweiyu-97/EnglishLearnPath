@@ -1,7 +1,6 @@
 package main
 
 import (
-	"archive/zip"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,8 +15,8 @@ import (
 func TestDiskStorePersistsAndKeepsBackup(t *testing.T) {
 	root := t.TempDir()
 	store := &diskStore{directory: root, configPath: filepath.Join(root, "config.json")}
-	first := json.RawMessage(`{"listening":[],"reading":[],"writings":[{"id":"one"}],"speaking":[],"activityDates":[]}`)
-	second := json.RawMessage(`{"listening":[],"reading":[],"writings":[],"speaking":[],"activityDates":[]}`)
+	first := json.RawMessage(`{"writings":[{"id":"one"}],"speaking":[],"activityDates":[]}`)
+	second := json.RawMessage(`{"writings":[],"speaking":[],"activityDates":[]}`)
 
 	if err := store.save(first); err != nil {
 		t.Fatalf("first save: %v", err)
@@ -139,97 +138,33 @@ func TestSecurityHeadersAllowLocalImagePreviewBlobs(t *testing.T) {
 	}
 }
 
-func TestZipExtractionAndDiscovery(t *testing.T) {
-	root := t.TempDir()
-	archivePath := filepath.Join(root, "original.zip")
-	createTestZip(t, archivePath, map[string]string{
-		"120. P2 Original/120. P2 Original.html": "<!doctype html><title>Original</title>",
-		"120. P2 Original/audio.mp3":             "fixture",
-	})
-	if err := extractArchiveOnce(root, archivePath); err != nil {
-		t.Fatalf("extract: %v", err)
-	}
-	items, warnings := discoverResources(root, "listening")
-	if len(warnings) != 0 {
-		t.Fatalf("unexpected warnings: %v", warnings)
-	}
-	if len(items) != 1 || items[0].Title != "120. P2 Original" {
-		t.Fatalf("unexpected resources: %#v", items)
-	}
-}
-
-func TestZipSlipIsRejected(t *testing.T) {
-	root := t.TempDir()
-	archivePath := filepath.Join(root, "unsafe.zip")
-	createTestZip(t, archivePath, map[string]string{"../outside.html": "unsafe"})
-	if err := extractArchiveOnce(root, archivePath); err == nil {
-		t.Fatal("zip slip archive should be rejected")
-	}
-}
-
-func TestResourceArchiveImportSkipsDuplicatesAndKeepsUpdates(t *testing.T) {
-	dataRoot := t.TempDir()
-	firstSourceRoot := t.TempDir()
-	updateSourceRoot := t.TempDir()
-	firstArchive := filepath.Join(firstSourceRoot, "reading-pack.zip")
-	updateArchive := filepath.Join(updateSourceRoot, "reading-pack.zip")
-	createTestZip(t, firstArchive, map[string]string{"July/article.pdf": "first"})
-	createTestZip(t, updateArchive, map[string]string{"August/article.pdf": "updated"})
-
-	previousDisk := disk
-	disk = &diskStore{directory: dataRoot, configPath: filepath.Join(dataRoot, "config.json")}
-	t.Cleanup(func() { disk = previousDisk })
-	if err := ensureResourceDirectories(); err != nil {
-		t.Fatalf("create resource directories: %v", err)
-	}
-
-	imported, skipped, err := importResourceArchives("reading", []string{firstArchive, firstArchive, updateArchive, updateArchive})
-	if err != nil {
-		t.Fatalf("import archives: %v", err)
-	}
-	if imported != 2 || skipped != 2 {
-		t.Fatalf("unexpected import result: imported=%d skipped=%d", imported, skipped)
-	}
-
-	readingRoot, err := resourceDirectory("reading")
-	if err != nil {
-		t.Fatal(err)
-	}
-	archives, err := findArchives(readingRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(archives) != 2 {
-		t.Fatalf("expected original and updated archive, got %d: %v", len(archives), archives)
-	}
-}
-
-func createTestZip(t *testing.T, target string, files map[string]string) {
-	t.Helper()
-	file, err := os.Create(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	writer := zip.NewWriter(file)
-	for name, content := range files {
-		entry, err := writer.Create(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := entry.Write([]byte(content)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Close(); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func todayForTest() string {
 	return timeNow().Format("2006-01-02")
+}
+
+func TestBindingDoesNotCreateResourceDirectories(t *testing.T) {
+	root := t.TempDir()
+	store := &diskStore{configPath: filepath.Join(t.TempDir(), "config.json")}
+	if _, err := store.switchDirectory(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "resources")); !os.IsNotExist(err) {
+		t.Fatalf("unexpected resources directory: %v", err)
+	}
+}
+
+func TestRetiredResourceAPIsAreUnavailable(t *testing.T) {
+	mux := http.NewServeMux()
+	registerAPI(mux)
+	for _, path := range []string{"/api/resources", "/api/resources/rescan", "/api/resources/import", "/api/resources/open", "/api/resources/open-directory"} {
+		for _, method := range []string{http.MethodGet, http.MethodPost} {
+			response := httptest.NewRecorder()
+			mux.ServeHTTP(response, httptest.NewRequest(method, path, nil))
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("retired API %s %s returned %d", method, path, response.Code)
+			}
+		}
+	}
 }
 
 var timeNow = func() time.Time { return time.Now() }

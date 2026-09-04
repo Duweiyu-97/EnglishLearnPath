@@ -1,0 +1,26 @@
+# Agent Instructions
+
+Read this file before working on this project. Preserve unrelated changes and user data.
+
+## Self-Correcting Rules Engine
+
+When the user corrects an implementation or workflow, fix the current issue and add a concise reusable rule below when appropriate. Avoid duplicate rules and do not retain temporary requests as permanent rules.
+
+## Learned Rules
+
+<!-- New reusable rules are appended below this line. Do not edit above this section. -->
+[UI] A single recording workflow must produce synchronized audio and transcript with one capture control and one durable save operation; history must restore both outputs.
+[UI] Changing a task type must update its dependent default settings; loading a saved record must preserve that record's explicit settings.
+[WORKFLOW] Verify the user's running copy and visible page after fixing a local app; changes only present in a development or candidate package do not fix an older running copy. Preserve unsaved work before refreshing.
+[CODE] Keep browser speech transcripts verbatim; handle ASR punctuation, capitalization, and uncertain sentence boundaries in AI review instructions rather than automatic local formatting.
+[WORKFLOW] Build into a fresh staging directory and never recursively clean the distribution root; users may run extracted packages and store data there.
+[UI] Use visible single-selection buttons instead of dropdowns for short notebook category lists, matching the adjacent filter controls and preserving an accessible selected state.
+[ARCH] User-requested API credential persistence must use local OS-backed encryption, support explicit removal, and stay outside learning backups and distribution packages.
+[UI] Render AI feedback as sanitized Markdown in both live results and saved history, keeping the original text in storage and bundling rendering dependencies for offline use.
+[UI] Practice history should lead with the specific question topic, with task type as secondary metadata; reference the user's existing local review layouts before redesigning report displays.
+[UI] Review reports belong on a dedicated navigable page, not a modal; show exact model-provided corrections inline in the original text and keep headers in normal flow so they do not obscure content.
+[WORKFLOW] When the user supplies an app or thread as a UI reference, reuse its presentation and interaction flow without importing its grading rules, personal data, or prompts unless explicitly requested.
+[UI] Inline annotations and their explanation cards must support navigation in both directions, restoring focus and highlighting the exact source passage on return.
+[UI] Keep answer editing separate from saved report presentation; hide conversational preambles and avoid repeating corrections already displayed as annotation cards.
+[UI] Place compact delete controls inside the top-right of history and notebook cards, reserving title space and overriding generic button height so controls never overlap text or stretch with the header.
+[CODE] Match review quotations across typographic hyphen, quote and whitespace variants using offsets into the untouched source; reject ambiguous or lexically different matches rather than inventing a location.

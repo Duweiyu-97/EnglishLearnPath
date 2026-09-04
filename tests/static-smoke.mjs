@@ -3,8 +3,6 @@ import { readFile } from "node:fs/promises";
 
 const html = await readFile(new URL("../app/index.html", import.meta.url), "utf8");
 const script = await readFile(new URL("../app/app.js", import.meta.url), "utf8");
-const listening = JSON.parse(await readFile(new URL("../examples/listening-original-example.json", import.meta.url), "utf8"));
-const reading = JSON.parse(await readFile(new URL("../examples/reading-original-example.json", import.meta.url), "utf8"));
 
 const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(match => match[1]);
 assert.equal(new Set(ids).size, ids.length, "index.html contains duplicate ids");
@@ -15,12 +13,23 @@ const availableIds = new Set([...ids, ...dynamicIds]);
 const missing = [...new Set(selectors)].filter(id => !availableIds.has(id));
 assert.deepEqual(missing, [], `app.js references missing ids: ${missing.join(", ")}`);
 
-for (const page of ["home", "listening", "reading", "writing", "speaking", "settings", "guide"]) {
+for (const page of ["home", "writing", "speaking", "plan", "mistakes", "settings", "guide"]) {
   assert.match(html, new RegExp(`data-page="${page}"`), `missing route page: ${page}`);
 }
 
-assert.ok(Array.isArray(listening.questions) && listening.questions.length > 0, "listening example requires questions");
-assert.ok(Array.isArray(reading.paragraphs) && reading.paragraphs.every(item => item.translation && item.summary), "reading example requires translations and summaries");
-assert.ok(Array.isArray(reading.questions) && reading.questions.every(item => item.answer && item.explanation), "reading example requires answers and explanations");
+assert.match(html, /id="writingPromptImageInput"/, "writing prompt image picker is required");
+assert.match(script, /promptImages:\s*\[\.\.\.pendingWritingPromptImages\]/, "writing prompt images must be saved with the record");
+assert.match(html, /data-mistake-filter="vocabulary"/, "vocabulary notebook filter is required");
+assert.match(html, /id="phasePlan"/, "exam-date phase plan container is required");
+assert.match(html, /id="heroPrimaryAction"[^>]*>配置学习计划</, "home primary action must be plan-driven rather than writing-only");
+assert.doesNotMatch(html, /开始今日写作/, "home must not force writing as the first activity");
+assert.match(html, /id="recordButton"[^>]*>开始录音并转写</, "recording must visibly start transcription");
+assert.doesNotMatch(html, /id="browserTranscribe"/, "speaking must not expose a separate transcription button");
+assert.doesNotMatch(html + script, /punctuateTranscript|id="punctuateSpeaking"/, "browser transcripts must not be auto-formatted");
+assert.match(script, /不得据此扣分/, "AI review must not penalize ASR punctuation or capitalization");
+assert.match(script, /不要修改或覆盖页面上的原始转写/, "AI review must preserve original transcript");
+
 
 console.log(`Static smoke test passed: ${ids.length} unique ids, ${new Set(selectors).size} referenced selectors.`);
+
+assert.doesNotMatch(html + script, /虾滑|ZYZ|data-route="(?:listening|reading)"|\/api\/resources/, "retired modules must not be exposed");

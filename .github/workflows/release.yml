@@ -1,4 +1,4 @@
-name: Build portable Windows package
+name: Build full offline Windows package
 
 on:
   push:
@@ -27,12 +27,14 @@ jobs:
         shell: pwsh
         run: |
           node --check app/app.js
+          node --check app/whisper.js
           node tests/static-smoke.mjs
+          node tests/speaking-writing-regression.mjs
 
       - name: Check launcher
         shell: pwsh
         run: |
-          gofmt -w launcher/main.go
+          Get-ChildItem launcher -Filter *.go | ForEach-Object { gofmt -w $_.FullName }
           git diff --exit-code
           Push-Location launcher
           go test ./...
@@ -48,7 +50,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: EnglishLearnPath-Windows-x64
+          name: EnglishLearnPath-Windows-x64-Full
           path: dist/*.zip
           if-no-files-found: error
 
@@ -59,4 +61,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $zip = Get-ChildItem -LiteralPath dist -Filter *.zip | Select-Object -First 1
-          gh release create "${{ github.ref_name }}" $zip.FullName --title "English Learning Path ${{ github.ref_name }}" --generate-notes
+          gh release create "${{ github.ref_name }}" $zip.FullName --title "English Learning Path ${{ github.ref_name }} · 完整离线包" --notes-file docs/RELEASE_NOTES.md

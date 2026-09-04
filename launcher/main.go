@@ -1,10 +1,8 @@
 package main
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,7 +15,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -41,7 +38,11 @@ type aiConfig struct {
 
 type configStore struct {
 	sync.RWMutex
-	value aiConfig
+	value     aiConfig
+	path      string
+	saved     bool
+	restored  bool
+	loadError string
 }
 
 type diskDataEnvelope struct {
@@ -61,24 +62,6 @@ type diskStore struct {
 	lastWrite  string
 }
 
-type resourceItem struct {
-	ID           string `json:"id"`
-	Title        string `json:"title"`
-	Kind         string `json:"kind"`
-	Format       string `json:"format"`
-	RelativePath string `json:"relativePath"`
-	filePath     string
-}
-
-type resourceCatalog struct {
-	sync.RWMutex
-	items      map[string]resourceItem
-	listening  []resourceItem
-	reading    []resourceItem
-	warnings   []string
-	lastScanAt string
-}
-
 type chatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
@@ -92,8 +75,10 @@ type chatRequest struct {
 
 type upstreamResponse struct {
 	Choices []struct {
-		Message struct {
-			Content any `json:"content"`
+		FinishReason string `json:"finish_reason"`
+		Message      struct {
+			Content          any    `json:"content"`
+			ReasoningContent string `json:"reasoning_content"`
 		} `json:"message"`
 	} `json:"choices"`
 	Error *struct {
@@ -102,10 +87,9 @@ type upstreamResponse struct {
 }
 
 var (
-	settings  = &configStore{}
-	client    = &http.Client{Timeout: 90 * time.Second}
-	disk      *diskStore
-	resources = &resourceCatalog{items: make(map[string]resourceItem)}
+	settings = &configStore{}
+	client   = &http.Client{Timeout: 90 * time.Second}
+	disk     *diskStore
 )
 
 func main() {
@@ -120,6 +104,8 @@ func main() {
 		writeStartupError(fmt.Errorf("无法初始化永久数据目录：%w", err))
 		return
 	}
+	settings.path = filepath.Join(filepath.Dir(disk.configPath), "ai-credentials.dpapi")
+	settings.restore()
 
 	// Let Windows assign a free loopback port. A fixed port can make a newly
 	// extracted copy open an older copy that is already running, which would
@@ -157,7 +143,7 @@ func main() {
 
 func registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/app/info", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]any{"name": "English Learning Path", "version": "0.3.1", "local": true})
+		writeJSON(w, http.StatusOK, map[string]any{"name": "English Learning Path", "version": "0.4.0-preview", "local": true})
 	})
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "app": "EnglishLearnPath"})
@@ -174,109 +160,12 @@ func registerAPI(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/data", handleDataSave)
 	mux.HandleFunc("POST /api/data/select-directory", handleDataSelectDirectory)
 	mux.HandleFunc("POST /api/data/open-directory", handleDataOpenDirectory)
-	mux.HandleFunc("GET /api/resources", handleResourcesList)
-	mux.HandleFunc("POST /api/resources/rescan", handleResourcesRescan)
-	mux.HandleFunc("POST /api/resources/import", handleResourcesImport)
-	mux.HandleFunc("POST /api/resources/open", handleResourceOpen)
-	mux.HandleFunc("POST /api/resources/open-directory", handleResourceDirectoryOpen)
 	mux.HandleFunc("GET /api/ai/status", handleAIStatus)
 	mux.HandleFunc("POST /api/ai/config", handleAIConfig)
 	mux.HandleFunc("POST /api/ai/disconnect", handleAIDisconnect)
 	mux.HandleFunc("POST /api/ai/chat", handleAIChat)
-}
-
-func handleResourcesList(w http.ResponseWriter, _ *http.Request) {
-	resources.RLock()
-	neverScanned := resources.lastScanAt == ""
-	resources.RUnlock()
-	if neverScanned {
-		_ = scanResourceCatalog()
-	}
-	writeJSON(w, http.StatusOK, resourceCatalogResponse())
-}
-
-func handleResourcesRescan(w http.ResponseWriter, _ *http.Request) {
-	if err := scanResourceCatalog(); err != nil {
-		writeError(w, http.StatusInternalServerError, "扫描本地资源失败："+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, resourceCatalogResponse())
-}
-
-func handleResourcesImport(w http.ResponseWriter, r *http.Request) {
-	kind := r.URL.Query().Get("kind")
-	if _, err := resourceDirectory(kind); err != nil {
-		writeError(w, http.StatusPreconditionFailed, err.Error())
-		return
-	}
-	selected, canceled, err := selectArchiveFiles(kind)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "打开压缩包选择器失败："+err.Error())
-		return
-	}
-	if canceled {
-		writeJSON(w, http.StatusOK, map[string]any{"canceled": true, "catalog": resourceCatalogResponse()})
-		return
-	}
-	imported, skipped, err := importResourceArchives(kind, selected)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "导入资源失败："+err.Error())
-		return
-	}
-	if err := scanResourceCatalog(); err != nil {
-		writeError(w, http.StatusInternalServerError, "资源已复制，但扫描失败："+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"canceled": false,
-		"imported": imported,
-		"skipped":  skipped,
-		"catalog":  resourceCatalogResponse(),
-	})
-}
-
-func handleResourceOpen(w http.ResponseWriter, r *http.Request) {
-	var input struct {
-		ID string `json:"id"`
-	}
-	if err := decodeJSON(w, r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	resources.RLock()
-	item, ok := resources.items[input.ID]
-	resources.RUnlock()
-	if !ok {
-		writeError(w, http.StatusNotFound, "资源不存在，请重新扫描")
-		return
-	}
-	if _, err := os.Stat(item.filePath); err != nil {
-		writeError(w, http.StatusNotFound, "本地资源文件已移动，请重新扫描")
-		return
-	}
-	if err := openBrowser(item.filePath); err != nil {
-		writeError(w, http.StatusInternalServerError, "无法打开本地资源："+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"opened": true})
-}
-
-func handleResourceDirectoryOpen(w http.ResponseWriter, r *http.Request) {
-	kind := r.URL.Query().Get("kind")
-	directory, err := resourceDirectory(kind)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if runtime.GOOS != "windows" {
-		writeError(w, http.StatusNotImplemented, "当前系统暂不支持从程序打开文件夹")
-		return
-	}
-	if err := exec.Command("explorer.exe", directory).Start(); err != nil {
-		writeError(w, http.StatusInternalServerError, "无法打开资源文件夹："+err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"opened": true})
+	mux.HandleFunc("GET /api/transcription/status", handleTranscriptionStatus)
+	mux.HandleFunc("POST /api/transcription", handleTranscription)
 }
 
 func handleDataStatus(w http.ResponseWriter, _ *http.Request) {
@@ -324,13 +213,6 @@ func handleDataSelectDirectory(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusInternalServerError, "绑定数据文件夹失败："+err.Error())
 		return
 	}
-	resources.Lock()
-	resources.items = make(map[string]resourceItem)
-	resources.listening = nil
-	resources.reading = nil
-	resources.warnings = nil
-	resources.lastScanAt = ""
-	resources.Unlock()
 	data, err := disk.load()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "读取新数据文件夹失败："+err.Error())
@@ -363,9 +245,9 @@ func handleDataOpenDirectory(w http.ResponseWriter, _ *http.Request) {
 
 func handleAIStatus(w http.ResponseWriter, _ *http.Request) {
 	settings.RLock()
+	defer settings.RUnlock()
 	cfg := settings.value
-	settings.RUnlock()
-	writeJSON(w, http.StatusOK, map[string]any{"connected": cfg.Connected, "model": cfg.Model})
+	writeJSON(w, http.StatusOK, map[string]any{"connected": cfg.Connected, "model": cfg.Model, "baseUrl": cfg.BaseURL, "saved": settings.saved, "restored": settings.restored, "storageError": settings.loadError})
 }
 
 func handleAIConfig(w http.ResponseWriter, r *http.Request) {
@@ -376,6 +258,12 @@ func handleAIConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	proposed.BaseURL = strings.TrimRight(strings.TrimSpace(proposed.BaseURL), "/")
 	proposed.Model = strings.TrimSpace(proposed.Model)
+	// Blank fields can reuse a saved key only for the exact same endpoint.
+	settings.RLock()
+	if proposed.APIKey == "" && proposed.BaseURL == settings.value.BaseURL {
+		proposed.APIKey = settings.value.APIKey
+	}
+	settings.RUnlock()
 	if err := validateConfig(proposed); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -385,21 +273,33 @@ func handleAIConfig(w http.ResponseWriter, r *http.Request) {
 		{Role: "system", Content: "Reply with exactly: CONNECTED"},
 		{Role: "user", Content: "Connection test"},
 	}
-	if _, err := callChat(r.Context(), proposed, testMessages, 0, 16); err != nil {
+	if _, err := callChat(r.Context(), proposed, testMessages, 0, 256, true); err != nil {
 		writeError(w, http.StatusBadGateway, "模型连接测试失败："+err.Error())
 		return
 	}
 	proposed.Connected = true
 	settings.Lock()
+	defer settings.Unlock()
+	if err := settings.persist(proposed); err != nil {
+		writeError(w, http.StatusInternalServerError, "连接测试成功，但无法加密保存到本地，请检查程序目录写入权限")
+		return
+	}
 	settings.value = proposed
-	settings.Unlock()
-	writeJSON(w, http.StatusOK, map[string]any{"connected": true, "model": proposed.Model})
+	settings.saved, settings.restored, settings.loadError = true, false, ""
+	writeJSON(w, http.StatusOK, map[string]any{"connected": true, "model": proposed.Model, "saved": true})
 }
 
 func handleAIDisconnect(w http.ResponseWriter, _ *http.Request) {
 	settings.Lock()
+	defer settings.Unlock()
+	if settings.path != "" {
+		if err := os.Remove(settings.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			writeError(w, http.StatusInternalServerError, "无法删除本地保存的接口配置，请检查文件权限")
+			return
+		}
+	}
 	settings.value = aiConfig{}
-	settings.Unlock()
+	settings.saved, settings.restored, settings.loadError = false, false, ""
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
@@ -431,10 +331,10 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maxTokens := input.MaxTokens
-	if maxTokens <= 0 || maxTokens > 4000 {
-		maxTokens = 1800
+	if maxTokens <= 0 || maxTokens > 8000 {
+		maxTokens = 6000
 	}
-	content, err := callChat(r.Context(), cfg, input.Messages, input.Temperature, maxTokens)
+	content, err := callChat(r.Context(), cfg, input.Messages, input.Temperature, maxTokens, false)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
@@ -442,12 +342,19 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"content": content})
 }
 
-func callChat(ctx context.Context, cfg aiConfig, messages []chatMessage, temperature float64, maxTokens int) (string, error) {
+func callChat(ctx context.Context, cfg aiConfig, messages []chatMessage, temperature float64, maxTokens int, connectionTest bool) (string, error) {
 	payload := map[string]any{
 		"model":       cfg.Model,
 		"messages":    messages,
 		"temperature": temperature,
 		"max_tokens":  maxTokens,
+	}
+	// DeepSeek V4 defaults to thinking mode. This text-feedback app uses chat
+	// mode for both probes and reviews so the output budget reaches the answer.
+	// Never send this provider-specific option to unrelated services.
+	base, _ := url.Parse(cfg.BaseURL)
+	if base != nil && strings.EqualFold(base.Hostname(), "api.deepseek.com") && strings.HasPrefix(strings.ToLower(cfg.Model), "deepseek-v4-") {
+		payload["thinking"] = map[string]string{"type": "disabled"}
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {
@@ -485,6 +392,12 @@ func callChat(ctx context.Context, cfg aiConfig, messages []chatMessage, tempera
 	}
 	content := extractContent(parsed.Choices[0].Message.Content)
 	if strings.TrimSpace(content) == "" {
+		if parsed.Choices[0].FinishReason == "length" {
+			return "", errors.New("模型输出达到长度上限，尚未生成最终答案；这不是 API Key 无效的提示")
+		}
+		if strings.TrimSpace(parsed.Choices[0].Message.ReasoningContent) != "" {
+			return "", errors.New("模型只返回了思考内容，没有最终答案；请检查模型的思考模式和输出限制")
+		}
 		return "", errors.New("模型没有返回文字内容")
 	}
 	return content, nil
@@ -554,11 +467,6 @@ func newDiskStore() (*diskStore, error) {
 		}
 	}
 	if store.directory != "" {
-		for _, name := range []string{"Listening-Xiahua", "Reading-ZYZ"} {
-			if err := os.MkdirAll(filepath.Join(store.directory, "resources", name), 0700); err != nil {
-				return nil, err
-			}
-		}
 		if info, statErr := os.Stat(store.dataPathLocked()); statErr == nil {
 			store.lastWrite = info.ModTime().Format(time.RFC3339)
 		}
@@ -732,12 +640,6 @@ func (s *diskStore) switchDirectory(selected string) (bool, error) {
 	defer s.Unlock()
 	previousDirectory := s.directory
 	s.directory = absolute
-	for _, name := range []string{"Listening-Xiahua", "Reading-ZYZ"} {
-		if err := os.MkdirAll(filepath.Join(s.directory, "resources", name), 0700); err != nil {
-			s.directory = previousDirectory
-			return false, err
-		}
-	}
 	if !loadedExisting {
 		if err := s.writeLocked(current); err != nil {
 			s.directory = previousDirectory
@@ -759,342 +661,6 @@ func (s *diskStore) persistConfigLocked() error {
 		return err
 	}
 	return os.WriteFile(s.configPath, payload, 0600)
-}
-
-func resourceDirectory(kind string) (string, error) {
-	root := disk.directoryPath()
-	if root == "" {
-		return "", errors.New("请先选择或创建永久数据文件夹")
-	}
-	var name string
-	switch kind {
-	case "listening":
-		name = "Listening-Xiahua"
-	case "reading":
-		name = "Reading-ZYZ"
-	default:
-		return "", errors.New("资源类型无效")
-	}
-	directory := filepath.Join(root, "resources", name)
-	if err := os.MkdirAll(directory, 0700); err != nil {
-		return "", err
-	}
-	return directory, nil
-}
-
-func ensureResourceDirectories() error {
-	if _, err := resourceDirectory("listening"); err != nil {
-		return err
-	}
-	if _, err := resourceDirectory("reading"); err != nil {
-		return err
-	}
-	return nil
-}
-
-func scanResourceCatalog() error {
-	if err := ensureResourceDirectories(); err != nil {
-		return err
-	}
-	listeningRoot, _ := resourceDirectory("listening")
-	readingRoot, _ := resourceDirectory("reading")
-	warnings := make([]string, 0)
-
-	for _, root := range []string{listeningRoot, readingRoot} {
-		archives, err := findArchives(root)
-		if err != nil {
-			warnings = append(warnings, err.Error())
-			continue
-		}
-		for _, archive := range archives {
-			if err := extractArchiveOnce(root, archive); err != nil {
-				warnings = append(warnings, filepath.Base(archive)+"："+err.Error())
-			}
-		}
-	}
-
-	listening, listeningWarnings := discoverResources(listeningRoot, "listening")
-	reading, readingWarnings := discoverResources(readingRoot, "reading")
-	warnings = append(warnings, listeningWarnings...)
-	warnings = append(warnings, readingWarnings...)
-	sort.Slice(listening, func(i, j int) bool { return listening[i].Title < listening[j].Title })
-	sort.Slice(reading, func(i, j int) bool { return reading[i].Title < reading[j].Title })
-
-	items := make(map[string]resourceItem, len(listening)+len(reading))
-	for _, item := range append(append([]resourceItem{}, listening...), reading...) {
-		items[item.ID] = item
-	}
-	resources.Lock()
-	resources.items = items
-	resources.listening = listening
-	resources.reading = reading
-	resources.warnings = warnings
-	resources.lastScanAt = time.Now().Format(time.RFC3339)
-	resources.Unlock()
-	return nil
-}
-
-func resourceCatalogResponse() map[string]any {
-	resources.RLock()
-	defer resources.RUnlock()
-	listeningRoot, _ := resourceDirectory("listening")
-	readingRoot, _ := resourceDirectory("reading")
-	return map[string]any{
-		"listening":       resources.listening,
-		"reading":         resources.reading,
-		"warnings":        resources.warnings,
-		"lastScanAt":      resources.lastScanAt,
-		"listeningFolder": listeningRoot,
-		"readingFolder":   readingRoot,
-	}
-}
-
-func findArchives(root string) ([]string, error) {
-	archives := make([]string, 0)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() && entry.Name() == ".EnglishLearnPath-extracted" {
-			return filepath.SkipDir
-		}
-		if !entry.IsDir() && strings.EqualFold(filepath.Ext(entry.Name()), ".zip") {
-			archives = append(archives, path)
-		}
-		return nil
-	})
-	return archives, err
-}
-
-func extractArchiveOnce(resourceRoot, archivePath string) error {
-	info, err := os.Stat(archivePath)
-	if err != nil {
-		return err
-	}
-	fingerprint := fmt.Sprintf("%s|%d|%d", archivePath, info.Size(), info.ModTime().UnixNano())
-	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(fingerprint)))[:12]
-	destination := filepath.Join(resourceRoot, ".EnglishLearnPath-extracted", digest)
-	marker := filepath.Join(destination, ".complete")
-	if _, err := os.Stat(marker); err == nil {
-		return nil
-	}
-
-	reader, err := zip.OpenReader(archivePath)
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-	if len(reader.File) > 20000 {
-		return errors.New("压缩包文件数量超过安全上限")
-	}
-	var total uint64
-	for _, file := range reader.File {
-		total += file.UncompressedSize64
-		if file.UncompressedSize64 > 2<<30 || total > 8<<30 {
-			return errors.New("压缩包解压大小超过安全上限")
-		}
-	}
-	if err := os.MkdirAll(destination, 0700); err != nil {
-		return err
-	}
-	destinationPrefix := destination + string(os.PathSeparator)
-	for _, file := range reader.File {
-		cleanName := filepath.Clean(filepath.FromSlash(file.Name))
-		if cleanName == "." || filepath.IsAbs(cleanName) || strings.HasPrefix(cleanName, ".."+string(os.PathSeparator)) {
-			return errors.New("压缩包包含不安全路径")
-		}
-		target := filepath.Join(destination, cleanName)
-		if target != destination && !strings.HasPrefix(target, destinationPrefix) {
-			return errors.New("压缩包包含越界路径")
-		}
-		if file.FileInfo().Mode()&os.ModeSymlink != 0 {
-			continue
-		}
-		if file.FileInfo().IsDir() {
-			if err := os.MkdirAll(target, 0700); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0700); err != nil {
-			return err
-		}
-		source, err := file.Open()
-		if err != nil {
-			return err
-		}
-		destinationFile, err := os.OpenFile(target, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
-		if err != nil {
-			source.Close()
-			return err
-		}
-		_, copyErr := io.Copy(destinationFile, io.LimitReader(source, int64(file.UncompressedSize64)+1))
-		closeErr := destinationFile.Close()
-		source.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		if closeErr != nil {
-			return closeErr
-		}
-	}
-	return os.WriteFile(marker, []byte(fingerprint), 0600)
-}
-
-func discoverResources(root, kind string) ([]resourceItem, []string) {
-	result := make([]resourceItem, 0)
-	warnings := make([]string, 0)
-	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
-		if err != nil {
-			warnings = append(warnings, err.Error())
-			return nil
-		}
-		if entry.IsDir() {
-			return nil
-		}
-		extension := strings.ToLower(filepath.Ext(entry.Name()))
-		allowed := (kind == "listening" && (extension == ".html" || extension == ".htm")) ||
-			(kind == "reading" && (extension == ".pdf" || extension == ".html" || extension == ".htm"))
-		if !allowed {
-			return nil
-		}
-		relative, relErr := filepath.Rel(root, path)
-		if relErr != nil {
-			return nil
-		}
-		title := strings.TrimSuffix(entry.Name(), filepath.Ext(entry.Name()))
-		digest := fmt.Sprintf("%x", sha256.Sum256([]byte(kind+"|"+path)))
-		result = append(result, resourceItem{
-			ID:           digest,
-			Title:        title,
-			Kind:         kind,
-			Format:       strings.TrimPrefix(extension, "."),
-			RelativePath: relative,
-			filePath:     path,
-		})
-		if len(result) >= 20000 {
-			return filepath.SkipAll
-		}
-		return nil
-	})
-	if err != nil {
-		warnings = append(warnings, err.Error())
-	}
-	return result, warnings
-}
-
-func importResourceArchives(kind string, selected []string) (int, int, error) {
-	destination, err := resourceDirectory(kind)
-	if err != nil {
-		return 0, 0, err
-	}
-	existingArchives, err := findArchives(destination)
-	if err != nil {
-		return 0, 0, err
-	}
-	existingDigests := make(map[string]struct{}, len(existingArchives))
-	for _, archivePath := range existingArchives {
-		digest, digestErr := fileDigest(archivePath)
-		if digestErr != nil {
-			return 0, 0, digestErr
-		}
-		existingDigests[fmt.Sprintf("%x", digest)] = struct{}{}
-	}
-	imported := 0
-	skipped := 0
-	for _, sourcePath := range selected {
-		if !strings.EqualFold(filepath.Ext(sourcePath), ".zip") {
-			return imported, skipped, fmt.Errorf("只支持 ZIP：%s", filepath.Base(sourcePath))
-		}
-		sourceInfo, err := os.Stat(sourcePath)
-		if err != nil || sourceInfo.IsDir() {
-			return imported, skipped, fmt.Errorf("无法读取：%s", filepath.Base(sourcePath))
-		}
-		sourceDigest, err := fileDigest(sourcePath)
-		if err != nil {
-			return imported, skipped, err
-		}
-		digestKey := fmt.Sprintf("%x", sourceDigest)
-		if _, exists := existingDigests[digestKey]; exists {
-			skipped++
-			continue
-		}
-		targetPath := filepath.Join(destination, filepath.Base(sourcePath))
-		if targetInfo, err := os.Stat(targetPath); err == nil && !targetInfo.IsDir() {
-			stem := strings.TrimSuffix(filepath.Base(sourcePath), filepath.Ext(sourcePath))
-			base := stem + "-update-" + time.Now().Format("20060102-150405")
-			targetPath = filepath.Join(destination, base+".zip")
-			for suffix := 2; ; suffix++ {
-				_, statErr := os.Stat(targetPath)
-				if errors.Is(statErr, os.ErrNotExist) {
-					break
-				}
-				if statErr != nil {
-					return imported, skipped, statErr
-				}
-				targetPath = filepath.Join(destination, fmt.Sprintf("%s-%d.zip", base, suffix))
-			}
-		}
-		if err := copyFile(sourcePath, targetPath); err != nil {
-			return imported, skipped, err
-		}
-		existingDigests[digestKey] = struct{}{}
-		imported++
-	}
-	return imported, skipped, nil
-}
-
-func filesHaveSameDigest(first, second string) (bool, error) {
-	firstDigest, err := fileDigest(first)
-	if err != nil {
-		return false, err
-	}
-	secondDigest, err := fileDigest(second)
-	if err != nil {
-		return false, err
-	}
-	return bytes.Equal(firstDigest, secondDigest), nil
-}
-
-func fileDigest(path string) ([]byte, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return nil, err
-	}
-	return hash.Sum(nil), nil
-}
-
-func copyFile(sourcePath, targetPath string) error {
-	source, err := os.Open(sourcePath)
-	if err != nil {
-		return err
-	}
-	defer source.Close()
-	temporaryPath := targetPath + ".tmp"
-	target, err := os.OpenFile(temporaryPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0600)
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(target, source)
-	closeErr := target.Close()
-	if copyErr != nil {
-		_ = os.Remove(temporaryPath)
-		return copyErr
-	}
-	if closeErr != nil {
-		_ = os.Remove(temporaryPath)
-		return closeErr
-	}
-	if err := os.Rename(temporaryPath, targetPath); err != nil {
-		_ = os.Remove(temporaryPath)
-		return err
-	}
-	return nil
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {

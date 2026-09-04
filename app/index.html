@@ -17,12 +17,10 @@
       </a>
       <nav class="nav-list">
         <button class="nav-item is-active" data-route="home"><span>⌂</span>学习概览</button>
-        <button class="nav-item" data-route="listening"><span>◖</span>听力练习</button>
-        <button class="nav-item" data-route="reading"><span>▤</span>阅读练习</button>
         <button class="nav-item" data-route="writing"><span>✎</span>写作工坊</button>
         <button class="nav-item" data-route="speaking"><span>◎</span>口语练习</button>
         <button class="nav-item" data-route="plan"><span>✓</span>学习计划</button>
-        <button class="nav-item" data-route="mistakes"><span>◇</span>错题与复盘</button>
+        <button class="nav-item" data-route="mistakes"><span>◇</span>错题与单词</button>
       </nav>
       <div class="sidebar-footer">
         <button class="nav-item" data-route="settings"><span>⚙</span>AI 与数据设置</button>
@@ -50,15 +48,13 @@
           <div>
             <span class="kicker">OPEN · LOCAL · YOURS</span>
             <h2>把材料留在自己手里，<br>把学习变成可持续的路径。</h2>
-            <p>这里不内置商业题库。你可以导入自己创作、公开许可或合法取得的材料；计时、记录、复盘和基础训练离线即可使用。</p>
+            <p>专注写作与口语：自主练习、保存作品、制定计划、持续复盘。计时和本地记录离线可用，语音转写与 AI 反馈按需连接服务。</p>
             <div class="button-row">
-              <button class="button button-primary" data-route="writing">开始今日写作</button>
+              <button id="heroPrimaryAction" type="button" class="button button-primary">配置学习计划</button>
               <button class="button button-secondary" data-route="guide">查看使用指南</button>
             </div>
           </div>
           <div class="hero-orbit" aria-hidden="true">
-            <span class="orbit-word word-listen">LISTEN</span>
-            <span class="orbit-word word-read">READ</span>
             <span class="orbit-word word-write">WRITE</span>
             <span class="orbit-word word-speak">SPEAK</span>
             <div class="orbit-core">PATH</div>
@@ -68,7 +64,7 @@
         <div class="metric-grid">
           <article class="metric-card"><span>练习总数</span><strong id="metricTotal">0</strong><small>保存在本机</small></article>
           <article class="metric-card"><span>写作篇数</span><strong id="metricWriting">0</strong><small>草稿与历史</small></article>
-          <article class="metric-card"><span>导入材料</span><strong id="metricImports">0</strong><small>听力与阅读</small></article>
+          <article class="metric-card"><span>口语次数</span><strong id="metricSpeaking">0</strong><small>录音与文字稿</small></article>
           <article class="metric-card"><span>连续学习</span><strong id="metricStreak">0</strong><small>天</small></article>
         </div>
 
@@ -77,61 +73,10 @@
           <div id="todayPlanList" class="today-task-list empty-state">尚未创建学习计划</div>
         </section>
 
-        <div class="section-heading"><div><span class="kicker">FOUR SKILLS</span><h2>选择一条练习路径</h2></div></div>
+        <div class="section-heading"><div><span class="kicker">WRITE & SPEAK</span><h2>选择一条练习路径</h2></div></div>
         <div class="skill-grid">
-          <button class="skill-card listening-card" data-route="listening"><span class="skill-number">01</span><h3>听力</h3><p>导入自己的音频和练习结构，逐题作答并核对。</p><span class="text-link">进入练习 →</span></button>
-          <button class="skill-card reading-card" data-route="reading"><span class="skill-number">02</span><h3>阅读</h3><p>文章、译文、段落大意与题目解析可随材料一起导入。</p><span class="text-link">进入练习 →</span></button>
-          <button class="skill-card writing-card" data-route="writing"><span class="skill-number">03</span><h3>写作</h3><p>计时写作、字数统计、本地历史与可选 AI 反馈。</p><span class="text-link">进入工坊 →</span></button>
-          <button class="skill-card speaking-card" data-route="speaking"><span class="skill-number">04</span><h3>口语</h3><p>自定义题目、浏览器录音、回听和文本反馈。</p><span class="text-link">进入练习 →</span></button>
-        </div>
-      </section>
-
-      <section class="page" data-page="listening">
-        <div class="page-intro panel compact-panel">
-          <div><span class="kicker">LISTENING LAB</span><h2>听力练习</h2><p>本项目不附带题库或受版权保护的录音。导入你有权使用的材料，数据仅存本机。</p></div>
-          <div class="button-row"><button id="importListeningArchives" class="button button-primary">导入或更新虾滑题库</button><button id="openListeningFolder" class="button button-secondary">打开虾滑目录</button><button id="rescanListening" class="button button-quiet">重新扫描</button><label class="button button-quiet file-button">导入 JSON<input id="listeningImport" type="file" accept="application/json,.json"></label><button id="listeningExample" class="button button-quiet">加载原创示例</button></div>
-        </div>
-        <div class="workspace-grid">
-          <aside class="library panel">
-            <div class="panel-title"><h3>虾滑本地资源</h3><span id="listeningResourceCount" class="count-pill">0</span></div>
-            <p id="listeningFolderPath" class="folder-path">正在读取固定目录……</p>
-            <div id="listeningResourceLibrary" class="library-list empty-state resource-list">把虾滑压缩包放入固定目录后点击扫描</div>
-            <div class="library-divider"></div>
-            <div class="panel-title"><h3>自建 JSON 材料</h3><span id="listeningCount" class="count-pill">0</span></div>
-            <div id="listeningLibrary" class="library-list empty-state">尚未导入听力材料</div>
-          </aside>
-          <div class="practice panel">
-            <div id="listeningEmpty" class="center-empty"><div class="empty-icon">◖</div><h3>从左侧选择一份材料</h3><p>支持含题目与答案的 JSON；音频由你在练习时从本机选择。</p><a href="../docs/import-format.html" class="text-link">查看导入格式</a></div>
-            <div id="listeningPractice" class="hidden">
-              <div class="practice-head"><div><span class="kicker">ACTIVE MATERIAL</span><h2 id="listeningTitle"></h2><p id="listeningDescription"></p></div><button id="deleteListening" class="button button-danger-quiet">移除材料</button></div>
-              <label class="field"><span>选择本机音频（不会上传）</span><input id="listeningAudio" type="file" accept="audio/*"></label>
-              <audio id="audioPlayer" class="audio-player" controls></audio>
-              <form id="listeningQuestions" class="question-list"></form>
-              <div class="button-row"><button id="checkListening" type="button" class="button button-primary">核对答案</button><button id="resetListening" type="button" class="button button-quiet">清空作答</button></div>
-              <div id="listeningResult" class="feedback-box hidden"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="page" data-page="reading">
-        <div class="page-intro panel compact-panel">
-          <div><span class="kicker">READING DESK</span><h2>阅读练习</h2><p>导入材料后，原文、翻译、段落大意和逐题解析会按文章直接展示，无需额外点击。</p></div>
-          <div class="button-row"><button id="importReadingArchives" class="button button-primary">导入或更新 ZYZ 题库</button><button id="openReadingFolder" class="button button-secondary">打开 ZYZ 目录</button><button id="rescanReading" class="button button-quiet">重新扫描</button><label class="button button-quiet file-button">导入 JSON<input id="readingImport" type="file" accept="application/json,.json"></label><button id="readingExample" class="button button-quiet">加载原创示例</button></div>
-        </div>
-        <div class="workspace-grid reading-workspace">
-          <aside class="library panel">
-            <div class="panel-title"><h3>ZYZ 本地资源</h3><span id="readingResourceCount" class="count-pill">0</span></div>
-            <p id="readingFolderPath" class="folder-path">正在读取固定目录……</p>
-            <div id="readingResourceLibrary" class="library-list empty-state resource-list">把 ZYZ 压缩包放入固定目录后点击扫描</div>
-            <div class="library-divider"></div>
-            <div class="panel-title"><h3>自建 JSON 文章</h3><span id="readingCount" class="count-pill">0</span></div>
-            <div id="readingLibrary" class="library-list empty-state">尚未导入阅读材料</div>
-          </aside>
-          <article class="practice panel reading-paper">
-            <div id="readingEmpty" class="center-empty"><div class="empty-icon">▤</div><h3>从左侧选择一篇文章</h3><p>支持双语段落、段落大意、题目答案及解析。</p><a href="../docs/import-format.html" class="text-link">查看导入格式</a></div>
-            <div id="readingPractice" class="hidden"></div>
-          </article>
+          <button class="skill-card writing-card" data-route="writing"><span class="skill-number">01</span><h3>写作</h3><p>计时写作、字数统计、本地历史与可选 AI 反馈。</p><span class="text-link">进入工坊 →</span></button>
+          <button class="skill-card speaking-card" data-route="speaking"><span class="skill-number">02</span><h3>口语</h3><p>自定义题目、浏览器录音、回听和文本反馈。</p><span class="text-link">进入练习 →</span></button>
         </div>
       </section>
 
@@ -152,10 +97,14 @@
               <div class="timer" id="writingTimer">40:00</div>
               <button id="toggleTimer" class="button button-secondary">开始计时</button>
             </div>
-            <label class="field"><span>题目</span><textarea id="writingPrompt" rows="3" placeholder="粘贴或输入你有权使用的题目……"></textarea></label>
+            <label class="field"><span>题目</span><textarea id="writingPrompt" rows="3" placeholder="粘贴或输入你有权使用的题目；也可以在这里按 Ctrl+V 粘贴题目图片……"></textarea></label>
+            <div class="writing-prompt-image-tools"><label class="button button-quiet file-button">选择题目图片<input id="writingPromptImageInput" type="file" accept="image/*" multiple></label><span>支持图表、流程图、地图或题目截图，最多 6 张</span></div>
+            <div id="writingPromptImagePreview" class="writing-prompt-images empty-state">尚未添加题目图片</div>
             <label class="field essay-field"><span>正文</span><textarea id="writingEssay" placeholder="Start writing here..." spellcheck="true"></textarea></label>
             <div class="editor-footer"><span><strong id="wordCount">0</strong> words</span><span id="saveStatus">尚未保存</span></div>
             <div class="button-row"><button id="saveWriting" class="button button-primary">保存到本机</button><button id="reviewWriting" class="button button-secondary ai-required">AI 写作反馈</button><button id="addWritingMistake" class="button button-quiet">加入写作复盘本</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div>
+            <p class="privacy-hint">AI 批改会使用学习计划中已保存的现有水平、目标水平和重点；请先在“学习计划”中填写并保存。</p>
+            <button id="openWritingReview" class="button button-secondary review-open-button">打开本题复盘 · 题目 / 原稿 / 修改</button>
             <div id="writingReview" class="ai-output hidden"></div>
           </div>
         </div>
@@ -163,7 +112,7 @@
 
       <section class="page" data-page="speaking">
         <div class="page-intro panel compact-panel">
-          <div><span class="kicker">SPEAKING ROOM</span><h2>口语练习</h2><p>输入自己的话题，使用浏览器录音并回听。当前通用 AI 接口只分析你粘贴的文字稿，不会自动上传录音。</p></div>
+          <div><span class="kicker">SPEAKING ROOM</span><h2>口语练习</h2><p>一次录音，自动转写。完整包默认在录音结束后离线识别；校对后点击“保存录音与文字稿”，两者一起永久保存到本地。只有文字稿可按需交给 AI 评价。</p></div>
           <button id="newSpeaking" class="button button-primary">新建口语练习</button>
         </div>
         <div class="speaking-grid">
@@ -171,18 +120,22 @@
             <label class="field"><span>练习话题</span><textarea id="speakingPrompt" rows="4" placeholder="输入今天想练习的话题或问题……"></textarea></label>
             <div class="recorder-stage">
               <div id="recordPulse" class="record-pulse"><span>00:00</span></div>
-              <button id="recordButton" class="record-button">开始录音</button>
-              <p id="recordHint">浏览器会在首次使用时请求麦克风权限</p>
+              <button id="recordButton" class="record-button">开始录音并转写</button>
+              <p id="recordHint">首次使用需允许麦克风；本地 Whisper 会在录音结束后自动生成文字稿</p>
             </div>
             <audio id="speakingPlayback" class="audio-player hidden" controls></audio>
             <button id="downloadRecording" class="button button-quiet hidden">下载本次录音</button>
           </div>
           <div class="panel transcript-panel">
             <div class="panel-title"><div><span class="kicker">TRANSCRIPT</span><h3>文字稿与复盘</h3></div></div>
-            <div class="transcription-toolbar"><label class="mini-field"><span>题型</span><select id="speakingPart"><option value="p1">Part 1</option><option value="p2">Part 2</option><option value="p3">Part 3</option><option value="free">自由表达</option></select></label><label class="mini-field"><span>转写语言</span><select id="speechLanguage"><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option></select></label><button id="browserTranscribe" class="button button-secondary">开始浏览器转写</button></div>
-            <p class="privacy-hint">浏览器语音转写不使用你配置的 AI 接口；Chrome/Edge 可能按自身规则将音频发送给浏览器厂商的语音服务。</p>
-            <textarea id="speakingTranscript" class="transcript-area" placeholder="把你说的内容整理或粘贴到这里。这样即使只有文字 API，也能进行表达、语法与结构反馈。"></textarea>
-            <div class="button-row"><button id="saveSpeaking" class="button button-primary">保存练习</button><button id="reviewSpeaking" class="button button-secondary ai-required">AI 评价与修改</button><button id="addSpeakingMistake" class="button button-quiet">加入口语复盘本</button><button id="deleteSpeaking" class="button button-danger-quiet hidden">删除记录</button></div>
+            <div class="transcription-toolbar"><label class="mini-field"><span>题型</span><select id="speakingPart"><option value="p1">Part 1</option><option value="p2">Part 2</option><option value="p3">Part 3</option><option value="free">自由表达</option></select></label><label class="mini-field"><span>转写语言</span><select id="speechLanguage"><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option></select></label><span class="integrated-transcription-note">随左侧录音自动转写</span></div>
+            <label class="field"><span>语音转写方式</span><select id="transcriptionEngine"><option value="whisper">本地 Whisper · 录音结束后离线转写</option><option value="browser">浏览器实时转写 · 可能联网</option></select></label>
+            <p id="transcriptionStatus" class="privacy-hint">正在检查本地语音组件……</p>
+            <div class="button-row"><button id="retryLocalTranscription" type="button" class="button button-secondary">用本地 Whisper 重新转写录音</button><button id="cancelLocalTranscription" type="button" class="button button-quiet hidden">取消转写</button></div>
+            <textarea id="speakingTranscript" class="transcript-area" placeholder="本地模式在录音结束后显示识别结果；浏览器模式实时显示。请回听核对，也可以手动修改或补充。"></textarea>
+            <div class="button-row"><button id="saveSpeaking" class="button button-primary">保存录音与文字稿</button><button id="reviewSpeaking" class="button button-secondary ai-required">AI 评价与修改</button><button id="addSpeakingMistake" class="button button-quiet">加入口语复盘本</button><button id="deleteSpeaking" class="button button-danger-quiet hidden">删除记录</button></div>
+            <p class="privacy-hint">AI 批改会使用学习计划中已保存的现有水平、目标水平和重点；未填写的项目会明确标为未提供。</p>
+            <button id="openSpeakingReview" class="button button-secondary review-open-button">打开本题复盘 · 话题 / 录音 / 修改</button>
             <div id="speakingReview" class="ai-output hidden"></div>
           </div>
         </div>
@@ -200,45 +153,43 @@
             <div class="form-grid two-columns">
               <label class="field"><span>预计考试日期</span><input id="planExamDate" type="date" required></label>
               <label class="field"><span>每日可学习时间（分钟）</span><input id="planDailyMinutes" type="number" min="15" max="720" value="180"></label>
-              <label class="field"><span>现有水平</span><input id="planCurrentLevel" type="text" placeholder="例如：总分 6.0，阅读 6.5，听力 5.5" required></label>
-              <label class="field"><span>目标水平</span><input id="planTargetLevel" type="text" placeholder="例如：总分 7.0，单项不低于 6.5" required></label>
+              <label class="field"><span>现有水平</span><input id="planCurrentLevel" type="text" placeholder="例如：写作 6.0，口语 5.5" required></label>
+              <label class="field"><span>目标水平</span><input id="planTargetLevel" type="text" placeholder="例如：写作 7.0，口语 6.5" required></label>
             </div>
-            <label class="field"><span>重点与补充信息</span><textarea id="planFocus" rows="4" placeholder="例如：重点提升听力填空和写作论证；周末时间更多；希望每周完整模考一次……"></textarea></label>
+            <label class="field"><span>重点与补充信息</span><textarea id="planFocus" rows="4" placeholder="例如：重点提升写作论证和口语流利度；周末时间更多；每周完成一次计时写作……"></textarea></label>
             <div class="manual-targets">
               <h4>手动计划：每天完成</h4>
-              <label><span>听力</span><input id="manualListening" type="number" min="0" max="10" value="1"><small>篇</small></label>
-              <label><span>阅读</span><input id="manualReading" type="number" min="0" max="10" value="1"><small>篇</small></label>
               <label><span>写作</span><input id="manualWriting" type="number" min="0" max="5" value="1"><small>篇</small></label>
               <label><span>口语</span><input id="manualSpeaking" type="number" min="0" max="10" value="1"><small>次</small></label>
               <label><span>错题复盘</span><input id="manualReview" type="number" min="0" max="240" value="30"><small>分钟</small></label>
             </div>
-            <div class="button-row"><button id="saveManualPlan" type="button" class="button button-primary">保存手动计划</button><button id="generateAiPlan" type="button" class="button button-secondary ai-required">AI 生成七日计划</button></div>
+            <div class="button-row"><button id="saveManualPlan" type="button" class="button button-primary">保存至考试日的手动计划</button><button id="generateAiPlan" type="button" class="button button-secondary ai-required">AI 生成考前计划</button></div>
             <div id="planResult" class="feedback-box hidden"></div>
           </form>
           <section class="panel plan-card">
-            <div class="panel-title"><div><span class="kicker">WEEKLY RHYTHM</span><h3>当前计划</h3></div><span id="planSourceBadge" class="status-badge status-off">未创建</span></div>
+            <div class="panel-title"><div><span class="kicker">PLAN TO EXAM</span><h3>当前考前计划</h3></div><span id="planSourceBadge" class="status-badge status-off">未创建</span></div>
             <div id="planSummary" class="plan-summary empty-state">先在左侧填写目标，然后手动保存或让 AI 生成。</div>
-            <div id="weeklyPlan" class="weekly-plan"></div>
+            <div id="phasePlan" class="phase-plan"></div>
             <div class="button-row"><button id="deletePlan" type="button" class="button button-danger-quiet hidden">删除当前计划</button></div>
           </section>
         </div>
       </section>
 
       <section class="page" data-page="mistakes">
-        <div class="page-intro panel compact-panel"><div><span class="kicker">REVIEW & IMPROVE</span><h2>错题与复盘</h2><p>听、读、写、说分别整理。可以粘贴文字，也可以在文本框中直接 Ctrl+V 粘贴剪贴板图片；图片压缩后只写入你绑定的本地数据文件。</p></div></div>
+        <div class="page-intro panel compact-panel"><div><span class="kicker">REVIEW & IMPROVE</span><h2>错题、复盘与单词本</h2><p>写作、口语和生词分别整理。可以粘贴文字，也可以在文本框中直接 Ctrl+V 粘贴剪贴板图片；所有内容只写入你绑定的本地数据文件。</p></div></div>
         <div class="mistake-layout">
           <form id="mistakeForm" class="panel mistake-composer">
             <div class="panel-title"><div><span class="kicker">NEW NOTE</span><h3>新增错题 / 复盘</h3></div></div>
-            <label class="field"><span>所属模块</span><select id="mistakeModule"><option value="listening">听力</option><option value="reading">阅读</option><option value="writing">写作</option><option value="speaking">口语</option></select></label>
-            <label class="field"><span>标题</span><input id="mistakeTitle" type="text" placeholder="例如：同义替换没有识别"></label>
-            <label class="field"><span>问题、原因与下次优化</span><textarea id="mistakeText" rows="9" placeholder="可以输入或粘贴文本；复制截图后在这里按 Ctrl+V，即可把图片附在这条记录中。"></textarea></label>
+            <div class="field"><span id="mistakeModuleLabel">所属模块</span><input id="mistakeModule" type="hidden" value="writing"><div class="mistake-filters" role="group" aria-labelledby="mistakeModuleLabel"><button type="button" class="button button-secondary is-active" data-mistake-module="writing" aria-pressed="true">写作</button><button type="button" class="button button-quiet" data-mistake-module="speaking" aria-pressed="false">口语</button><button type="button" class="button button-quiet" data-mistake-module="vocabulary" aria-pressed="false">单词本</button></div></div>
+            <label class="field"><span>标题 / 单词或短语</span><input id="mistakeTitle" type="text" placeholder="例如：同义替换没有识别 / sustainable"></label>
+            <label class="field"><span>问题与优化 / 释义与例句</span><textarea id="mistakeText" rows="9" placeholder="错题可记录原因和下次优化；单词可记录释义、搭配和例句。复制截图后在这里按 Ctrl+V 即可附图。"></textarea></label>
             <label class="button button-quiet file-button">选择图片<input id="mistakeImageInput" type="file" accept="image/*" multiple></label>
             <div id="mistakeImagePreview" class="mistake-image-preview empty-state">尚未添加图片</div>
             <div class="button-row"><button type="submit" class="button button-primary">保存到错题本</button><button id="resetMistakeForm" type="button" class="button button-quiet">清空编辑区</button></div>
           </form>
           <section class="panel mistake-library">
-            <div class="panel-title"><div><span class="kicker">LOCAL NOTEBOOK</span><h3>四科错题本</h3></div><span id="mistakeCount" class="count-pill">0</span></div>
-            <div class="mistake-filters"><button class="button button-secondary is-active" data-mistake-filter="all">全部</button><button class="button button-quiet" data-mistake-filter="listening">听力</button><button class="button button-quiet" data-mistake-filter="reading">阅读</button><button class="button button-quiet" data-mistake-filter="writing">写作</button><button class="button button-quiet" data-mistake-filter="speaking">口语</button></div>
+            <div class="panel-title"><div><span class="kicker">LOCAL NOTEBOOK</span><h3>错题复盘与单词本</h3></div><span id="mistakeCount" class="count-pill">0</span></div>
+            <div class="mistake-filters"><button class="button button-secondary is-active" data-mistake-filter="all">全部</button><button class="button button-quiet" data-mistake-filter="writing">写作</button><button class="button button-quiet" data-mistake-filter="speaking">口语</button><button class="button button-quiet" data-mistake-filter="vocabulary">单词本</button></div>
             <div id="mistakeList" class="mistake-list empty-state">还没有错题或复盘记录</div>
           </section>
         </div>
@@ -255,7 +206,6 @@
             <div id="unboundStoragePrompt" class="notice hidden"><strong>尚未选择数据文件夹</strong><p>第一次使用时，请选择一个长期保存的文件夹。选择已有 EnglishLearnPath 数据的目录会自动载入；选择空目录会创建新档案。</p></div>
             <div id="boundStorageDetails" class="hidden">
               <div class="path-card"><span>当前目录</span><code id="dataDirectoryPath">尚未选择</code><small id="dataFileStatus">尚未读取数据文件状态</small></div>
-              <div class="resource-paths"><div><strong>虾滑听力固定目录</strong><code id="settingsListeningPath">绑定后显示</code></div><div><strong>ZYZ 阅读固定目录</strong><code id="settingsReadingPath">绑定后显示</code></div></div>
             </div>
             <div class="button-row"><button id="selectDataDirectory" class="button button-primary">绑定或更换数据文件夹</button><button id="openDataDirectory" class="button button-secondary">在资源管理器中打开</button><button id="writeDataNow" class="button button-quiet">立即写入磁盘</button></div>
             <div id="storageResult" class="feedback-box hidden"></div>
@@ -264,10 +214,10 @@
             <div class="panel-title"><div><span class="kicker">OPENAI-COMPATIBLE</span><h3>AI 接口</h3></div><span id="settingsAiBadge" class="status-badge status-off">未连接</span></div>
             <label class="field"><span>服务商预设</span><select id="aiProvider"><option value="deepseek" selected>DeepSeek（已有 DeepSeek Key 选这个）</option><option value="openai">OpenAI</option><option value="ollama">本地模型（Ollama 兼容）</option><option value="custom">其他 OpenAI 兼容服务</option></select><small>选择后会自动填写接口地址和建议模型；仍可手动修改。</small></label>
             <label class="field"><span>接口地址</span><input id="aiBaseUrl" type="url" value="https://api.deepseek.com" placeholder="https://api.deepseek.com" autocomplete="off"><small id="aiProviderHelp">DeepSeek 官方 OpenAI 兼容地址。程序会自动请求 /chat/completions。</small></label>
-            <label class="field"><span>API Key</span><input id="aiApiKey" type="password" placeholder="仅在本次启动期间保存在内存中" autocomplete="off"><small>不会写入浏览器存储、配置文件或 Git 仓库。</small></label>
+            <label class="field"><span>API Key</span><input id="aiApiKey" type="password" placeholder="填写后在本机加密保存" autocomplete="off"><small>使用 Windows 当前账户加密，保存在程序旁的 runtime-data 中；不进入学习备份、浏览器缓存或发布包。更换电脑或账户需重新输入。DeepSeek V4 批改默认使用非思考模式。</small></label>
             <label class="field"><span>模型名称</span><input id="aiModel" type="text" value="deepseek-v4-flash" placeholder="例如：deepseek-v4-flash" autocomplete="off"></label>
             <div class="notice"><strong>DeepSeek 怎么填？</strong><p>只有 DeepSeek API Key 时，选择上面的 DeepSeek 预设即可：接口地址为 <code>https://api.deepseek.com</code>，建议模型为 <code>deepseek-v4-flash</code>。模型名称可能随服务商更新，请以官方文档为准。</p></div>
-            <div class="button-row"><button type="submit" class="button button-primary">保存并测试连接</button><button id="disconnectAi" type="button" class="button button-quiet">断开</button></div>
+            <div class="button-row"><button type="submit" class="button button-primary">保存并测试连接</button><button id="disconnectAi" type="button" class="button button-quiet">断开并删除已保存配置</button></div>
             <div id="aiTestResult" class="feedback-box hidden"></div>
           </form>
           <div class="panel settings-card">
@@ -281,10 +231,20 @@
       <section class="page" data-page="guide">
         <div class="guide panel">
           <span class="kicker">START HERE</span><h2>三步开始使用</h2>
-          <div class="guide-steps"><article><span>01</span><h3>绑定本地目录</h3><p>首次启动先选择自己的长期数据文件夹，所有记录直接写入磁盘。</p></article><article><span>02</span><h3>放入合法资源</h3><p>把虾滑听力或 ZYZ 阅读压缩包放到程序显示的固定目录，点击扫描即可接入。</p></article><article><span>03</span><h3>按需连接 AI</h3><p>在设置页选择服务商预设，填写自己的 Key 并测试连接，即可启用高级反馈。</p></article></div>
+          <div class="guide-steps"><article><span>01</span><h3>绑定本地目录</h3><p>首次启动先选择自己的长期数据文件夹，所有记录直接写入磁盘。</p></article><article><span>02</span><h3>开始写作与口语</h3><p>输入自己的题目或话题，写作可粘贴题图，口语一次录音同步转写并保存。</p></article><article><span>03</span><h3>按需连接 AI</h3><p>在设置页选择服务商预设，填写自己的 Key 并测试连接，即可启用高级反馈。</p></article></div>
           <div class="notice legal-notice"><strong>版权边界</strong><p>项目本身不提供、抓取或引导下载商业题库。请不要公开分发你无权传播的题目、音频、范文或课程资料。</p></div>
           <div class="button-row"><button class="button button-primary" data-route="home">返回学习中心</button><a class="button button-secondary" href="https://github.com/Duweiyu-97/EnglishLearnPath#readme" target="_blank" rel="noreferrer">阅读项目说明</a></div>
         </div>
+      </section>
+      <section id="reviewWorkspace" class="page review-workspace" data-page="review" aria-labelledby="reviewWorkspaceTitle">
+        <header class="review-workspace-header"><div><span class="kicker">QUESTION REVIEW · 批改报告</span><h2 id="reviewWorkspaceTitle">本题批改</h2><p id="reviewWorkspaceMeta" class="privacy-hint"></p></div><div class="button-row"><button id="closeReviewWorkspace" class="button button-secondary">返回练习</button><button id="editReviewSource" class="button button-primary">编辑本题答案</button></div></header>
+        <p id="reviewWorkspaceNotice" class="privacy-hint"></p>
+        <section class="panel review-question"><span class="kicker">ORIGINAL QUESTION</span><h3>题目 / 话题</h3><div id="reviewWorkspacePrompt" class="review-original"></div><div id="reviewWorkspaceImages" class="writing-prompt-images"></div><audio id="reviewWorkspaceAudio" class="audio-player hidden" controls></audio></section>
+        <nav id="reviewWorkspaceNavigation" class="review-section-navigation" aria-label="批改报告章节"></nav>
+        <section id="reviewRawTranscriptPanel" class="panel review-source hidden"><span class="kicker">RAW TRANSCRIPT</span><h3>原始转写</h3><p class="privacy-hint">录音转写原样保留，仅展示，不在此处添加修改标注。</p><div id="reviewRawTranscript" class="review-original"></div></section>
+        <section class="panel review-source"><div class="panel-title"><div><span class="kicker">YOUR ANSWER</span><h3 id="reviewAnnotatedTitle">原文与修改标注</h3></div><span id="reviewAnnotationCount" class="count-pill">0</span></div><div id="reviewPunctuationTools" class="hidden"><p id="punctuationStatus" class="privacy-hint"></p><button id="generatePunctuation" class="button button-secondary" type="button">AI 生成标点与大小写整理稿</button></div><p id="reviewAnnotationNotice" class="privacy-hint"></p><div id="reviewWorkspaceOriginal" class="review-original annotated-original"></div></section>
+        <section id="reviewCorrectionsSection" class="panel"><span class="kicker">CORRECTIONS</span><h3>逐条修改</h3><div id="reviewCorrections" class="review-corrections"></div></section>
+        <section class="review-result"><h3>完整批改报告</h3><div id="reviewWorkspaceFeedback" class="ai-output review-report"></div></section>
       </section>
     </main>
   </div>
@@ -293,12 +253,17 @@
       <span class="kicker">FIRST START</span>
       <h2 id="onboardingTitle">先选择永久数据文件夹</h2>
       <p>English Learning Path 不把学习档案存进浏览器缓存。请选择一个长期保留的本地文件夹，题目、作文和练习记录都会直接写入其中。</p>
-      <div class="onboarding-options"><div><span>新用户</span><strong>选择或新建空文件夹</strong><small>程序会建立数据文件与虾滑、ZYZ 两个资源目录。</small></div><div><span>已有数据</span><strong>选择以前绑定的文件夹</strong><small>检测到 <code>EnglishLearnPath-data.json</code> 后自动恢复。</small></div></div>
+      <div class="onboarding-options"><div><span>新用户</span><strong>选择或新建空文件夹</strong><small>程序会将作文、录音、文字稿、计划与复盘写入数据文件。</small></div><div><span>已有数据</span><strong>选择以前绑定的文件夹</strong><small>检测到 <code>EnglishLearnPath-data.json</code> 后自动恢复。</small></div></div>
       <button id="onboardingSelectDirectory" class="button button-primary">选择或创建文件夹</button>
       <small class="onboarding-footnote">完成选择前不会显示路径，也不会把练习记录写入浏览器缓存。</small>
     </section>
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="vendor/marked.umd.js"></script>
+  <script src="vendor/purify.min.js"></script>
+  <script src="markdown.js"></script>
+  <script src="review-annotations.js"></script>
+  <script src="whisper.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -15,10 +15,14 @@
 *.key
 *.pem
 *.pfx
+*.dpapi
+.ai-credential-*
 *.wav
 *.mp3
 *.m4a
 *.webm
+/whisper/
+*.bin
 
 # Editor and OS files
 .DS_Store

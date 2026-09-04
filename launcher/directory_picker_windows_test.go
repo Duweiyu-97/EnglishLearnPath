@@ -4,8 +4,6 @@ package main
 
 import (
 	"os"
-	"path/filepath"
-	"reflect"
 	"syscall"
 	"testing"
 	"time"
@@ -21,22 +19,6 @@ var (
 )
 
 const wmClose = 0x0010
-
-func TestParseSingleSelectedArchive(t *testing.T) {
-	buffer := pickerBuffer(`D:\资料\reading pack.zip`)
-	want := []string{`D:\资料\reading pack.zip`}
-	if got := parseMultiSelectBuffer(buffer); !reflect.DeepEqual(got, want) {
-		t.Fatalf("single selection mismatch: %#v", got)
-	}
-}
-
-func TestParseMultipleSelectedArchives(t *testing.T) {
-	buffer := pickerBuffer(`D:\资料`, "one.zip", "two update.zip")
-	want := []string{filepath.Join(`D:\资料`, "one.zip"), filepath.Join(`D:\资料`, "two update.zip")}
-	if got := parseMultiSelectBuffer(buffer); !reflect.DeepEqual(got, want) {
-		t.Fatalf("multiple selection mismatch: %#v", got)
-	}
-}
 
 func TestNativePickersCanBeCanceledAndReopened(t *testing.T) {
 	if os.Getenv("ENGLISH_LEARN_PATH_UI_TEST") != "1" {
@@ -54,16 +36,6 @@ func TestNativePickersCanBeCanceledAndReopened(t *testing.T) {
 		}
 	}
 
-	for _, kind := range []string{"listening", "reading"} {
-		closed := closeNextNativeDialog()
-		selected, canceled, err := selectArchiveFiles(kind)
-		if err != nil {
-			t.Fatalf("%s archive picker: %v", kind, err)
-		}
-		if len(selected) != 0 || !canceled || !<-closed {
-			t.Fatalf("%s archive picker did not cancel cleanly", kind)
-		}
-	}
 }
 
 func closeNextNativeDialog() <-chan bool {
@@ -97,13 +69,4 @@ func closeNextNativeDialog() <-chan bool {
 		result <- false
 	}()
 	return result
-}
-
-func pickerBuffer(parts ...string) []uint16 {
-	buffer := make([]uint16, 0, 128)
-	for _, part := range parts {
-		encoded, _ := syscall.UTF16FromString(part)
-		buffer = append(buffer, encoded...)
-	}
-	return append(buffer, 0)
 }
