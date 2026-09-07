@@ -25,9 +25,13 @@ assert.match(html, /id="heroPrimaryAction"[^>]*>配置学习计划</, "home prim
 assert.doesNotMatch(html, /开始今日写作/, "home must not force writing as the first activity");
 assert.match(html, /id="recordButton"[^>]*>开始录音并转写</, "recording must visibly start transcription");
 assert.doesNotMatch(html, /id="browserTranscribe"/, "speaking must not expose a separate transcription button");
+assert.doesNotMatch(html, /id="saveWriting"|id="saveSpeaking"/, "writing and speaking must autosave without separate save buttons");
+assert.doesNotMatch(html + script, /transcriptionEngine|SpeechRecognition|webkitSpeechRecognition|浏览器实时转写/, "browser transcription path must be completely retired");
 assert.doesNotMatch(html + script, /punctuateTranscript|id="punctuateSpeaking"/, "browser transcripts must not be auto-formatted");
 assert.match(script, /不得据此扣分/, "AI review must not penalize ASR punctuation or capitalization");
 assert.match(script, /不要修改或覆盖页面上的原始转写/, "AI review must preserve original transcript");
+assert.match(script, /至少 40% 的可用时间安排给复盘/, "AI plans must prioritize review over task volume");
+assert.match(script, /只有客观、明确、在当前语境下无合理争议/, "writing review must only mark definite errors");
 
 
 console.log(`Static smoke test passed: ${ids.length} unique ids, ${new Set(selectors).size} referenced selectors.`);

@@ -110,6 +110,14 @@ const server = http.createServer(async (req, res) => {
     await page.locator('#review-correction-4 .correction-return').click();
     assert.equal(await page.evaluate(()=>document.activeElement.id),'review-original-4');
     assert.equal(await page.locator('.annotation-mark.is-returned').count(),1,'return highlights only the corresponding original');
+    const strictWriting = await page.evaluate(() => {
+      const markdown = '### 确定语法错误\n\n| 原文 | 修改 | 类型 | 原因 |\n|---|---|---|---|\n| I likes cycling. | I like cycling. | 主谓一致 | 动词形式错误 |\n| It is good. | It is beneficial. | 表达优化 | 可选升级 |\n\n### 可选优化建议\n\n- “good” 可以按需换成 “beneficial”。';
+      const result = window.renderReviewAnnotations({original:'I likes cycling. It is good.',markdown,definiteOnly:true,originalElement:document.querySelector('#reviewWorkspaceOriginal'),correctionsElement:document.querySelector('#reviewCorrections'),countElement:document.querySelector('#reviewAnnotationCount'),noticeElement:document.querySelector('#reviewAnnotationNotice')});
+      return {count:result.count,marks:document.querySelectorAll('.annotation-mark').length,text:document.querySelector('#reviewCorrections').textContent};
+    });
+    assert.equal(strictWriting.count,1,'writing annotations must exclude optional style improvements');
+    assert.equal(strictWriting.marks,1);
+    assert.doesNotMatch(strictWriting.text,/beneficial/);
     assert.equal(await page.locator('.review-workspace-header').evaluate(el=>getComputedStyle(el).position),'static');
     await page.evaluate(()=>window.scrollTo(0,0));
     await page.screenshot({path:path.join(root,'docs/images/question-review.png'),fullPage:false});
@@ -170,7 +178,7 @@ const server = http.createServer(async (req, res) => {
     await page.waitForFunction(()=>document.querySelector('#generatePunctuation').classList.contains('hidden'));
     await page.reload();
     assert.equal(await page.locator('#reviewWorkspaceOriginal').textContent(),'I like cycling.');
-    assert.equal(data.speaking[0].transcript,'I like cycling.');
+    assert.equal(data.speaking[0].transcript,'A later edit.','edited practice text must autosave while the report keeps its submitted snapshot');
     assert.equal(data.speaking[0].punctuatedTranscript,'I like cycling.');
     await page.locator('#menuButton').click();
     await page.locator('.nav-item[data-route="writing"]').click();

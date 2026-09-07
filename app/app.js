@@ -41,23 +41,17 @@
   let aiConnected = false;
   let timerInterval = null;
   let timerSeconds = 40 * 60;
+  let writingAutosaveTimer = null;
+  let speakingAutosaveTimer = null;
   let recorder = null;
-  let speechRecognizer = null;
-  let speechStopRequested = false;
-  let speechTranscriptBase = "";
-  let speechFinalText = "";
-  let speechInterimText = "";
-  let speechRestartTimer = null;
   let recordingStream = null;
   let recordingChunks = [];
   let recordingBlob = null;
+  let recordingBlobDirty = false;
   let recordingSession = 0;
   let recordingBusy = false;
   let localTranscriptionReady = false;
   let localTranscriptionController = null;
-  let captureUsesWhisper = false;
-  let speechEndPromise = Promise.resolve();
-  let resolveSpeechEnd = null;
   let recordSeconds = 0;
   let recordInterval = null;
   let toastTimer = null;
@@ -241,20 +235,39 @@
 
   function readManualTargets() {
     return {
-      writing: clampCount($("#manualWriting").value, 5),
-      speaking: clampCount($("#manualSpeaking").value),
-      reviewMinutes: clampCount($("#manualReview").value, 240),
-      note: "按手动设置执行；可根据当天状态适当调整。"
+      writing: clampCount($("#manualWriting").value, 1),
+      speaking: clampCount($("#manualSpeaking").value, 2),
+      writingReview: clampCount($("#manualWritingReview").value, 1),
+      writingRewrite: clampCount($("#manualWritingRewrite").value, 1),
+      speakingReview: clampCount($("#manualSpeakingReview").value, 1),
+      languageMinutes: clampCount($("#manualLanguage").value, 60),
+      reviewMinutes: clampCount($("#manualReview").value, 120),
+      note: "少量输出，优先完成反馈核对、语料整理和重练。"
     };
   }
 
   function normalizePlanDay(value = {}) {
     return {
-      writing: clampCount(value.writing, 5),
-      speaking: clampCount(value.speaking),
+      writing: clampCount(value.writing, 1),
+      speaking: clampCount(value.speaking, 2),
+      writingReview: clampCount(value.writingReview, 1),
+      writingRewrite: clampCount(value.writingRewrite, 1),
+      speakingReview: clampCount(value.speakingReview, 1),
+      languageMinutes: clampCount(value.languageMinutes, 60),
       reviewMinutes: clampCount(value.reviewMinutes, 240),
       note: String(value.note || "").slice(0, 240)
     };
+  }
+
+  function normalizeAiPlanDay(value = {}) {
+    const day = normalizePlanDay(value);
+    if (day.writing) {
+      day.writingReview = 1;
+      day.writingRewrite = 1;
+    }
+    if (day.speaking) day.speakingReview = 1;
+    if ((day.writing || day.speaking) && day.languageMinutes < 10) day.languageMinutes = 10;
+    return day;
   }
 
   function parsePlanDate(value) {
@@ -393,7 +406,7 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           messages: [
-            { role: "system", content: "你是写作与口语学习规划师。只规划写作、口语及相关错题与词汇复盘，不安排其他科目或外部题库任务。只输出一个 JSON 对象，不要 Markdown。结构必须为 {summary:string, priorities:string[], phases:[阶段项]}。phases 数量和顺序必须与用户提供的阶段窗口完全一致。每个阶段项只含 name、focus、days；days 必须是周一到周日顺序的 7 项数组，每项必须含 writing、speaking、reviewMinutes 三个非负整数和 note 字符串。这里的 7 项只是该阶段内不同星期的执行节奏，整体计划必须覆盖用户给出的全部阶段直到考试日。任务量必须符合每日可用时间；临近考试逐步增加计时练习、整套输出、错题回收和状态调整。不要虚构用户没有提供的诊断。" },
+            { role: "system", content: "你是写作与口语学习规划师。只规划写作、口语及相关错题、词汇和语料复盘，不安排其他科目或外部题库任务。学习的核心是完成少量输出后的复盘闭环，不是堆积新题：核对反馈、确认确定错误、整理可复用语料、重写或重说，必须比疯狂刷题更优先。只输出一个 JSON 对象，不要 Markdown。结构必须为 {summary:string, priorities:string[], phases:[阶段项]}。phases 数量和顺序必须与用户提供的阶段窗口完全一致。每个阶段项只含 name、focus、days；days 必须是周一到周日顺序的 7 项数组，每项必须含 writing、speaking、writingReview、writingRewrite、speakingReview、languageMinutes、reviewMinutes 七个非负整数和 note 字符串。writing 每天只能为 0 或 1，speaking 每天最多 2；writingReview、writingRewrite、speakingReview 每项最多 1。至少 40% 的可用时间安排给复盘、重写/重说、语料记忆和错题回收，并安排轻量日或休息日。写作任务的完整闭环是：完成写作→核对批改→记录确定语法错误与可复用表达→重写关键段落或全文→对照检查。口语任务的完整闭环是：录音转写→回听校对→核对批改→整理表达→重说同题。这里的 7 项只是该阶段内不同星期的执行节奏，整体计划必须覆盖用户给出的全部阶段直到考试日。任务量必须符合每日可用时间；临近考试逐步增加计时练习、整套输出、错题回收和状态调整。不要虚构用户没有提供的诊断。" },
             { role: "user", content: `今天：${today()}\n预计考试日期：${profile.examDate}\n计划总天数：${totalDays}\n现有水平：${profile.currentLevel}\n目标水平：${profile.targetLevel}\n每日时间：${profile.dailyMinutes} 分钟\n重点与限制：${profile.focus || "未补充"}\n固定阶段窗口：${JSON.stringify(blueprints)}\n请为每个阶段安排不同的训练重点和周一至周日执行节奏。` }
           ],
           temperature: 0.2,
@@ -411,7 +424,7 @@
           ...blueprint,
           name: String(generated.name || blueprint.name).slice(0, 80),
           focus: String(generated.focus || blueprint.focus).slice(0, 600),
-          days: generated.days.map(normalizePlanDay)
+          days: generated.days.map(normalizeAiPlanDay)
         };
       });
       state.studyPlan = {
@@ -449,6 +462,10 @@
       const day = manualDay;
       $("#manualWriting").value = day.writing;
       $("#manualSpeaking").value = day.speaking;
+      $("#manualWritingReview").value = day.writingReview;
+      $("#manualWritingRewrite").value = day.writingRewrite;
+      $("#manualSpeakingReview").value = day.speakingReview;
+      $("#manualLanguage").value = day.languageMinutes;
       $("#manualReview").value = day.reviewMinutes;
     }
   }
@@ -477,7 +494,7 @@
       const signatures = phase.days.map(day => JSON.stringify(normalizePlanDay(day)));
       const allSame = signatures.every(signature => signature === signatures[0]);
       const days = allSame ? [{ label: "每天", value: phase.days[0] }] : phase.days.map((value, index) => ({ label: dayNames[index], value }));
-      return `<article class="plan-phase"><header><div><strong>${escapeHtml(phase.name)}</strong><span>${escapeHtml(phase.startDate)} — ${escapeHtml(phase.endDate)} · ${planDaysInclusive(phase.startDate, phase.endDate)} 天</span></div><p>${escapeHtml(phase.focus || "按阶段目标稳定执行并及时复盘。")}</p></header><div class="phase-days">${days.map(item => { const day = normalizePlanDay(item.value); return `<div><b>${item.label}</b><span>写 ${day.writing} · 说 ${day.speaking} · 复盘 ${day.reviewMinutes} 分钟${day.note ? ` · ${escapeHtml(day.note)}` : ""}</span></div>`; }).join("")}</div></article>`;
+      return `<article class="plan-phase"><header><div><strong>${escapeHtml(phase.name)}</strong><span>${escapeHtml(phase.startDate)} — ${escapeHtml(phase.endDate)} · ${planDaysInclusive(phase.startDate, phase.endDate)} 天</span></div><p>${escapeHtml(phase.focus || "按阶段目标稳定执行并及时复盘。")}</p></header><div class="phase-days">${days.map(item => { const day = normalizePlanDay(item.value); const details = [`新写作 ${day.writing}`, `新口语 ${day.speaking}`, day.writingReview ? `写作精改 ${day.writingReview}` : "", day.writingRewrite ? `重写 ${day.writingRewrite}` : "", day.speakingReview ? `口语回听 ${day.speakingReview}` : "", day.languageMinutes ? `语料 ${day.languageMinutes} 分钟` : "", day.reviewMinutes ? `错题/单词 ${day.reviewMinutes} 分钟` : ""].filter(Boolean).join(" · "); return `<div><b>${item.label}</b><span>${details || "休息或自由复盘"}${day.note ? ` · ${escapeHtml(day.note)}` : ""}</span></div>`; }).join("")}</div></article>`;
     }).join("");
   }
 
@@ -502,10 +519,14 @@
     const target = planDayForDate(plan, dateString);
     if (!target) return [];
     const tasks = [
-      ...Array.from({ length: target.writing }, (_, index) => ({ id: `writing-${index}`, kind: "writing", title: `写作练习 ${index + 1}`, detail: "进入写作工坊，完成并保存" })),
-      ...Array.from({ length: target.speaking }, (_, index) => ({ id: `speaking-${index}`, kind: "speaking", title: `口语练习 ${index + 1}`, detail: "一次录音、自动转写，保存后按需 AI 评价" }))
+      ...Array.from({ length: target.writing }, (_, index) => ({ id: `writing-${index}`, kind: "writing", title: `新写作 ${index + 1}`, detail: "完成一篇，系统自动保存；新输出保持少量，给后续复盘留时间" })),
+      ...Array.from({ length: target.speaking }, (_, index) => ({ id: `speaking-${index}`, kind: "speaking", title: `新口语 ${index + 1}`, detail: "一次录音，自动离线转写并写入本机" })),
+      ...Array.from({ length: target.writingReview }, (_, index) => ({ id: `writing-review-${index}`, kind: "writing-review", title: "写作反馈核对", detail: "只记录确定语法错误；把可选表达优化单独整理" })),
+      ...Array.from({ length: target.writingRewrite }, (_, index) => ({ id: `writing-rewrite-${index}`, kind: "writing-rewrite", title: "写作重写与对照", detail: "根据复盘重写关键段落或全文，再与原稿对照" })),
+      ...Array.from({ length: target.speakingReview }, (_, index) => ({ id: `speaking-review-${index}`, kind: "speaking-review", title: "口语回听与重说", detail: "回听核对转写、整理表达，再重说同一话题" }))
     ];
-    if (target.reviewMinutes) tasks.push({ id: "review-0", kind: "review", title: `错题与单词复盘 ${target.reviewMinutes} 分钟`, detail: "进入错题与单词本，复盘错误并巩固重点词汇" });
+    if (target.languageMinutes) tasks.push({ id: "language-0", kind: "review", title: `常用语料记忆 ${target.languageMinutes} 分钟`, detail: "整理并主动回忆本题可复用的搭配、句型和例子" });
+    if (target.reviewMinutes) tasks.push({ id: "review-0", kind: "review", title: `错题与单词复盘 ${target.reviewMinutes} 分钟`, detail: "回看旧错误，完成一次主动回忆和改正" });
     return tasks;
   }
 
@@ -569,6 +590,8 @@
     const task = todayTaskActions.get(id);
     if (!task) return;
     if (task.kind === "review") return routeTo("mistakes");
+    if (task.kind === "writing-review" || task.kind === "writing-rewrite") return routeTo("writing");
+    if (task.kind === "speaking-review") return routeTo("speaking");
     routeTo(task.kind);
     if (task.kind === "writing") newWriting();
     else if (task.kind === "speaking") newSpeaking();
@@ -748,7 +771,7 @@
     if (!id || !confirm("确定删除这篇写作记录吗？")) return;
     state.writings = state.writings.filter(entry => entry.id !== id);
     saveState();
-    if (activeWritingId === id) newWriting(); else renderWritingHistory();
+    if (activeWritingId === id) newWriting(true); else renderWritingHistory();
     showToast("写作记录已删除");
   }
 
@@ -769,7 +792,7 @@
         pendingWritingPromptImages.push(compressed);
       }
       renderWritingPromptImages();
-      $("#saveStatus").textContent = activeWritingId ? "有未保存的修改" : "尚未保存";
+      scheduleWritingAutosave();
       showToast(`已添加 ${images.length} 张题目图片`);
     } catch (error) {
       showToast(error.message);
@@ -795,11 +818,13 @@
     $$('[data-remove-writing-prompt-image]', root).forEach(button => button.addEventListener("click", () => {
       pendingWritingPromptImages.splice(Number(button.dataset.removeWritingPromptImage), 1);
       renderWritingPromptImages();
-      $("#saveStatus").textContent = activeWritingId ? "有未保存的修改" : "尚未保存";
+      scheduleWritingAutosave();
     }));
   }
 
-  function newWriting() {
+  async function newWriting(skipAutosave = false) {
+    if (skipAutosave) clearTimeout(writingAutosaveTimer); else await flushWritingAutosave();
+    writingAutosaveTimer = null;
     activeWritingId = null;
     $("#writingType").value = "Task 2";
     $("#writingMinutes").value = "40";
@@ -812,14 +837,15 @@
     $("#writingReview").textContent = "";
     $("#writingReview").classList.add("hidden");
     $("#deleteWriting").classList.add("hidden");
-    $("#saveStatus").textContent = "尚未保存";
+    $("#saveStatus").textContent = "内容会自动保存到本机";
     resetWritingTimer();
     updateWordCount(false);
     renderWritingHistory();
     $("#writingPrompt").focus();
   }
 
-  function loadWriting(id) {
+  async function loadWriting(id) {
+    await flushWritingAutosave();
     const item = state.writings.find(entry => entry.id === id);
     if (!item) return;
     activeWritingId = id;
@@ -832,7 +858,7 @@
     renderWritingPromptImages();
     $("#writingEssay").value = item.essay;
     $("#deleteWriting").classList.remove("hidden");
-    $("#saveStatus").textContent = `上次保存 ${new Date(item.updatedAt).toLocaleString()}`;
+    $("#saveStatus").textContent = `上次自动保存 ${new Date(item.updatedAt).toLocaleString()}`;
     $("#writingReview").textContent = "";
     $("#writingReview").classList.add("hidden");
     resetWritingTimer();
@@ -840,11 +866,11 @@
     renderWritingHistory();
   }
 
-  async function saveWriting() {
+  async function saveWriting({ silent = false } = {}) {
     await pendingWritingPromptImageJob;
     const prompt = $("#writingPrompt").value.trim();
     const essay = $("#writingEssay").value.trim();
-    if (!prompt && !essay && !pendingWritingPromptImages.length) return showToast("请先输入题目、添加题目图片或填写正文");
+    if (!prompt && !essay && !pendingWritingPromptImages.length) return false;
     const existing = state.writings.find(entry => entry.id === activeWritingId);
     const record = {
       id: activeWritingId || uid(),
@@ -865,17 +891,36 @@
     try {
       await saveState(true);
     } catch {
-      return showToast("写作未能写入本地文件，请检查数据目录");
+      $("#saveStatus").textContent = "自动保存失败，请检查数据目录";
+      if (!silent) showToast("写作未能写入本地文件，请检查数据目录");
+      return false;
     }
     $("#deleteWriting").classList.remove("hidden");
-    $("#saveStatus").textContent = `已保存 ${new Date().toLocaleTimeString()}`;
+    $("#saveStatus").textContent = `已自动保存 ${new Date().toLocaleTimeString()}`;
     renderWritingHistory();
-    showToast("写作已保存在本机");
+    if (!silent) showToast("写作已保存在本机");
+    return true;
   }
 
   function updateWordCount(markDirty = true) {
     $("#wordCount").textContent = countWords($("#writingEssay").value);
-    if (markDirty) $("#saveStatus").textContent = activeWritingId ? "有未保存的修改" : "尚未保存";
+    if (markDirty) scheduleWritingAutosave();
+  }
+
+  function scheduleWritingAutosave() {
+    $("#saveStatus").textContent = "正在等待自动保存…";
+    clearTimeout(writingAutosaveTimer);
+    writingAutosaveTimer = setTimeout(() => {
+      writingAutosaveTimer = null;
+      saveWriting({ silent: true });
+    }, 700);
+  }
+
+  async function flushWritingAutosave() {
+    if (!writingAutosaveTimer) return true;
+    clearTimeout(writingAutosaveTimer);
+    writingAutosaveTimer = null;
+    return saveWriting({ silent: true });
   }
 
   function formatClock(seconds) {
@@ -887,27 +932,28 @@
     clearInterval(timerInterval);
     timerInterval = null;
     timerSeconds = Number($("#writingMinutes").value) * 60;
-    $("#writingTimer").textContent = Number($("#writingMinutes").value) ? formatClock(timerSeconds) : "∞";
-    $("#toggleTimer").textContent = "开始计时";
+    const countUp = !Number($("#writingMinutes").value);
+    $("#writingTimer").textContent = formatClock(timerSeconds);
+    $("#toggleTimer").textContent = countUp ? "开始正计时" : "开始倒计时";
   }
 
   function toggleWritingTimer() {
+    const countUp = !Number($("#writingMinutes").value);
     if (timerInterval) {
       clearInterval(timerInterval);
       timerInterval = null;
-      $("#toggleTimer").textContent = "继续计时";
+      $("#toggleTimer").textContent = countUp ? "继续正计时" : "继续倒计时";
       return;
     }
-    if (!Number($("#writingMinutes").value)) return showToast("当前选择了不计时");
-    if (timerSeconds <= 0) resetWritingTimer();
+    if (!countUp && timerSeconds <= 0) resetWritingTimer();
     $("#toggleTimer").textContent = "暂停计时";
     timerInterval = setInterval(() => {
-      timerSeconds -= 1;
+      timerSeconds += countUp ? 1 : -1;
       $("#writingTimer").textContent = formatClock(timerSeconds);
-      if (timerSeconds <= 0) {
+      if (!countUp && timerSeconds <= 0) {
         clearInterval(timerInterval);
         timerInterval = null;
-        $("#toggleTimer").textContent = "重新计时";
+        $("#toggleTimer").textContent = "重新倒计时";
         showToast("计时结束，记得保存并复盘");
       }
     }, 1000);
@@ -1097,6 +1143,7 @@
     const feedback = item?.review || "尚未生成 AI 反馈。原稿和录音无需 AI 即可保存与复习。";
     const annotations = window.renderReviewAnnotations?.({
       original: writing ? original || "" : punctuated, markdown: item?.review || "", punctuationOnly: !writing,
+      definiteOnly: writing,
       originalElement: $("#reviewWorkspaceOriginal"), correctionsElement: $("#reviewCorrections"),
       countElement: $("#reviewAnnotationCount"), noticeElement: $("#reviewAnnotationNotice")
     });
@@ -1157,7 +1204,7 @@
       const response = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messages.map(message => message.role === "system" ? { ...message, content: message.content + "\n输出使用 Markdown：首先单独一行写‘主题：具体主题短标题’（8–20 个汉字，概括本题内容，不要只写 Task 2 或泛称教育类）；随后各反馈部分使用三级标题，逐条修改使用 Markdown 表格，列名固定为“原文｜修改｜类型｜原因”，原文单元格逐字引用待修改片段，不添加省略号，方便页面精确标注，示范答案与翻译分开成节。不使用 HTML，不把整份报告包在代码块中。" } : message), temperature: 0.25, max_tokens: 6000 })
+        body: JSON.stringify({ messages: messages.map(message => message.role === "system" ? { ...message, content: message.content + "\n输出使用 Markdown：首先单独一行写‘主题：具体主题短标题’（8–20 个汉字，概括本题内容，不要只写 Task 2 或泛称教育类）；随后各反馈部分使用三级标题。只有确定错误章节可以使用 Markdown 四列表格，列名固定为“原文｜修改｜类型｜原因”，原文单元格逐字引用待修改片段，不添加省略号，方便页面精确标注。可选优化建议必须放在独立章节，使用普通项目符号，不得复用该四列表格，也不得把优化标成原文错误。示范答案与翻译分开成节。不使用 HTML，不把整份报告包在代码块中。" } : message), temperature: 0.25, max_tokens: 6000 })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "请求失败");
@@ -1183,14 +1230,13 @@
     const prompt = $("#writingPrompt").value.trim();
     const essay = $("#writingEssay").value.trim();
     if (!essay) return showToast("请先完成一段写作");
-    await saveWriting();
-    if (!activeWritingId) return;
+    if (!await saveWriting({ silent: true }) || !activeWritingId) return;
     const recordId = activeWritingId;
     const reviewInput = { prompt, original: essay, type: $("#writingType").value, promptImages: [...pendingWritingPromptImages] };
     const learnerContext = reviewLearnerContext("写作");
     const imageNotice = pendingWritingPromptImages.length ? `\n题目另附 ${pendingWritingPromptImages.length} 张本地图片；当前通用文字接口无法读取图片，请仅依据下面的文字题目反馈，并明确图表细节无法核对。` : "";
     askAi([
-      { role: "system", content: `你是一名严谨的 IELTS 写作教练。用户消息包含现有水平和目标水平。先按当前能力选择最易掌握、最有收益的修改与练习，再按目标水平生成可模仿的答案，并说明从当前到目标的关键差距。优先参考本模块的单项水平；只有总分时不要自行推定单项分数。现有水平只作学习背景，原稿评分仍独立依据实际文本证据，不得因为目标高就抬高原稿评分。目标未提供时明确说明，并给与原稿相近且略有提升的示范，不擅自设定固定目标分数。只依据用户提供的题目和原文；缺少关键信息时说明不确定性，不虚构官方成绩。反馈固定按以下顺序：\n1. 题型与主题判断；\n2. 非官方预估总分及合理区间；\n3. 四项标准（Task 1 用 TA/CC/LR/GRA，Task 2 用 TR/CC/LR/GRA）及限制分数的证据；\n4. 任务完成、段落结构与论证/数据概括；\n5. 逐句纠错：列出原文精确片段、局部修改、错误类型和简短原因；\n6. 只选 3–5 个最优先问题，并给短练习；\n7. 在保留原意的前提下给一版可模仿的目标水平英文修改稿，不堆砌生词；\n8. 按段给出准确自然的中文翻译；\n9. 只补充 2–3 条本题可直接复用的表达。\nTask 1 先核对比较对象、时间、单位和图表结构，再提取 2–3 个主特征，解释 Overview 和两个细节段为什么这样分组；如果没有图表信息，明确无法核对数据。Task 2 检查是否答全问题、立场是否直接、每段是否形成观点—解释—例子/结果。不要照搬私人模板或课程资料。` },
+      { role: "system", content: `你是一名严谨、克制的 IELTS 写作教练。用户消息包含现有水平和目标水平。先按当前能力选择最易掌握、最有收益的修改与练习，再按目标水平生成可模仿的答案，并说明从当前到目标的关键差距。优先参考本模块的单项水平；只有总分时不要自行推定单项分数。现有水平只作学习背景，原稿评分仍独立依据实际文本证据，不得因为目标高就抬高原稿评分。目标未提供时明确说明，并给与原稿相近且略有提升的示范，不擅自设定固定目标分数。只依据用户提供的题目和原文；缺少关键信息时说明不确定性，不虚构官方成绩。\n\n纠错边界必须严格遵守：只有客观、明确、在当前语境下无合理争议的语法、拼写、词形、主谓一致、时态、冠词、单复数、介词或句法错误，才放入“确定语法错误”章节并使用原文｜修改｜类型｜原因四列表格，修改必须尽量小。措辞更自然、词汇更高级、表达更简洁、段落更流畅、论证更充分等都只是可选优化，不得标红原文，不得写入纠错表，必须放在独立的“可选优化建议”章节用普通项目符号说明。正确但不够漂亮的句子绝不能判错；证据不足时宁可不改。若没有确定错误，明确写“未发现需要标注的确定语法错误”，不要为了凑数量制造错误。语气具体、建设性，避免把整段正确内容全部判错。\n\n反馈固定按以下顺序：\n1. 题型与主题判断；\n2. 非官方预估总分及合理区间；\n3. 四项标准（Task 1 用 TA/CC/LR/GRA，Task 2 用 TR/CC/LR/GRA）及限制分数的证据；\n4. 任务完成、段落结构与论证/数据概括；\n5. 确定语法错误：只列客观错误的原文精确片段、最小修改、错误类型和简短原因；\n6. 可选优化建议：把语言提升、自然度、简洁度、衔接与论证建议单独列出，不标成错误；\n7. 只选 3–5 个最优先问题，并给短练习；\n8. 在保留原意的前提下给一版可模仿的目标水平英文修改稿，不堆砌生词；\n9. 按段给出准确自然的中文翻译；\n10. 只补充 2–3 条本题可直接复用的表达。\nTask 1 先核对比较对象、时间、单位和图表结构，再提取 2–3 个主特征，解释 Overview 和两个细节段为什么这样分组；如果没有图表信息，明确无法核对数据。Task 2 检查是否答全问题、立场是否直接、每段是否形成观点—解释—例子/结果。不要照搬私人模板或课程资料。` },
       { role: "user", content: `${learnerContext}\n\n写作类型：${$("#writingType").value}${imageNotice}\n题目：${prompt || "未提供文字题目"}\n\n我的正文：\n${essay}` }
     ], $("#writingReview"), content => {
       const record = state.writings.find(entry => entry.id === recordId);
@@ -1210,15 +1256,15 @@
     const prompt = $("#speakingPrompt").value.trim();
     const transcript = $("#speakingTranscript").value.trim();
     if (!transcript) return showToast("请先粘贴或整理本次口语文字稿");
-    if (!await saveSpeaking()) return;
+    if (!await saveSpeaking({ silent: true })) return;
     const recordId = activeSpeakingId;
     const part = $("#speakingPart").value;
     const reviewInput = { prompt, original: transcript, type: part };
     const learnerContext = reviewLearnerContext("口语");
     askAi([
-      { role: "system", content: `你是一名谨慎的 IELTS 口语教练。用户消息包含现有水平和目标水平。先按当前能力选择最易掌握、最有收益的修改与练习，再按目标水平生成可模仿的答案，并说明从当前到目标的关键差距。优先参考本模块的单项水平；只有总分时不要自行推定单项分数。现有水平只作学习背景，原稿评分仍独立依据实际文本证据，不得因为目标高就抬高原稿评分。目标未提供时明确说明，并给与原稿相近且略有提升的示范，不擅自设定固定目标分数。你只收到浏览器转写文本，没有音频，因此绝对不能评价具体发音、重音、语调或真实停顿；Pronunciation 必须标为“无法仅凭文字判断”。输入是浏览器语音转写（ASR），不是用户逐字键入的作文。标点缺失、句首或专名大小写缺失、识别分段不准确都可能来自 ASR，不得据此扣分，也不要列为用户口语语法错误。先在内部结合上下文作保守的语义分句，再评价表达并生成优化答案与错误修正；不要修改或覆盖页面上的原始转写。句界或词语存在歧义时标为“转写待核对”，说明判断限制，不要凭空补词、猜测发音或把可能的识别错误断言为用户错误。错误修正只针对有充分文本依据的用词、搭配、语法和内容组织问题；保留原观点和口语风格。\n反馈固定顺序：1. 一句话总体表现与低置信度的非官方文字表现区间；2. FC（只评价答案展开与文本连贯线索）、LR、GRA，P 标记不可评；3. 最多 3 个优先改进项；4. 逐句列出原片段、最小修改和中文原因；5. 保留用户原观点、经历、理由与口语风格，给一版对齐用户目标、可真实复述且衔接当前能力的版本；6. 4–8 条本题可复用表达；7. 2–4 个 3–10 分钟专项练习并建议重说同题。不要编造新人物、经历、数据或观点，不要把答案改成书面论文。Part 1 目标约 3–5 个自然句、40–65 词；Part 2 覆盖题卡并形成清晰故事线；Part 3 使用直接回答—原因—例子/对比—影响/小结，通常 70–100 词。` },
+      { role: "system", content: `你是一名谨慎的 IELTS 口语教练。用户消息包含现有水平和目标水平。先按当前能力选择最易掌握、最有收益的修改与练习，再按目标水平生成可模仿的答案，并说明从当前到目标的关键差距。优先参考本模块的单项水平；只有总分时不要自行推定单项分数。现有水平只作学习背景，原稿评分仍独立依据实际文本证据，不得因为目标高就抬高原稿评分。目标未提供时明确说明，并给与原稿相近且略有提升的示范，不擅自设定固定目标分数。你只收到本地 Whisper 生成的 ASR 转写文本，没有可供模型直接分析的音频，因此绝对不能评价具体发音、重音、语调或真实停顿；Pronunciation 必须标为“无法仅凭文字判断”。输入不是用户逐字键入的作文。标点缺失、句首或专名大小写缺失、识别分段不准确都可能来自 ASR，不得据此扣分，也不要列为用户口语语法错误。先在内部结合上下文作保守的语义分句，再评价表达并生成优化答案与错误修正；不要修改或覆盖页面上的原始转写。句界或词语存在歧义时标为“转写待核对”，说明判断限制，不要凭空补词、猜测发音或把可能的识别错误断言为用户错误。错误修正只针对有充分文本依据的用词、搭配、语法和内容组织问题；保留原观点和口语风格。\n反馈固定顺序：1. 一句话总体表现与低置信度的非官方文字表现区间；2. FC（只评价答案展开与文本连贯线索）、LR、GRA，P 标记不可评；3. 最多 3 个优先改进项；4. 逐句列出原片段、最小修改和中文原因；5. 保留用户原观点、经历、理由与口语风格，给一版对齐用户目标、可真实复述且衔接当前能力的版本；6. 4–8 条本题可复用表达；7. 2–4 个 3–10 分钟专项练习并建议重说同题。不要编造新人物、经历、数据或观点，不要把答案改成书面论文。Part 1 目标约 3–5 个自然句、40–65 词；Part 2 覆盖题卡并形成清晰故事线；Part 3 使用直接回答—原因—例子/对比—影响/小结，通常 70–100 词。` },
       { role: "system", content: "页面展示要求：不要寒暄。增加独立三级标题‘转写整理稿’，其正文只放补充基础标点、大小写和分段后的转写，不得增删替换原始转写中的词语，不得修复语法或猜测识别错误。逐句修改仍单独列出，原片段逐字引用用户的原始转写，页面会将修改定位到整理稿。不要在其他章节重复整理稿。" },
-      { role: "user", content: `${learnerContext}\n\n题型：${part}\n话题：${prompt || "自由表达"}\n\n浏览器转写文字稿：\n${transcript}` }
+      { role: "user", content: `${learnerContext}\n\n题型：${part}\n话题：${prompt || "自由表达"}\n\n本地 Whisper 转写文字稿：\n${transcript}` }
     ], $("#speakingReview"), content => {
       const record = state.speaking.find(entry => entry.id === recordId);
       if (!record) return;
@@ -1239,80 +1285,11 @@
     }, () => activeSpeakingId === recordId);
   }
 
-  function renderLiveTranscript() {
-    const completed = [speechTranscriptBase, speechFinalText.trim()].filter(Boolean).join(speechTranscriptBase ? "\n" : " ");
-    $("#speakingTranscript").value = [completed, speechInterimText.trim()].filter(Boolean).join(completed ? " " : "");
-  }
-
-  function startRecordingTranscription() {
-    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!Recognition) {
-      showToast("当前浏览器不支持自动转写，录音仍会正常保留；建议使用新版 Chrome 或 Edge");
-      return false;
-    }
-
-    speechStopRequested = false;
-    speechTranscriptBase = $("#speakingTranscript").value.trim();
-    speechFinalText = "";
-    speechInterimText = "";
-    speechRecognizer = new Recognition();
-    const recognition = speechRecognizer;
-    speechEndPromise = new Promise(resolve => { resolveSpeechEnd = resolve; });
-    speechRecognizer.continuous = true;
-    speechRecognizer.interimResults = true;
-    speechRecognizer.lang = $("#speechLanguage").value;
-    speechRecognizer.onresult = event => {
-      if (speechRecognizer !== recognition) return;
-      let interimText = "";
-      for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const text = event.results[index][0]?.transcript || "";
-        if (event.results[index].isFinal) speechFinalText += `${text.trim()} `; else interimText += text;
-      }
-      speechInterimText = interimText;
-      renderLiveTranscript();
-    };
-    speechRecognizer.onerror = event => {
-      if (["not-allowed", "service-not-allowed", "audio-capture"].includes(event.error)) speechStopRequested = true;
-      if (event.error !== "aborted" && event.error !== "no-speech") showToast(`浏览器转写失败：${event.error}`);
-    };
-    speechRecognizer.onend = () => {
-      if (speechRecognizer !== recognition) return;
-      if (speechInterimText.trim()) speechFinalText += `${speechInterimText.trim()} `;
-      speechInterimText = "";
-      renderLiveTranscript();
-      if (!speechStopRequested && recorder?.state === "recording") {
-        clearTimeout(speechRestartTimer);
-        speechRestartTimer = setTimeout(() => {
-          if (speechStopRequested || recorder?.state !== "recording") return;
-          try {
-            speechRecognizer.start();
-          } catch (error) {
-            showToast(`自动转写未能继续：${error.message}`);
-          }
-        }, 250);
-      } else {
-        speechRecognizer = null;
-        resolveSpeechEnd?.();
-        resolveSpeechEnd = null;
-      }
-    };
-    try {
-      speechRecognizer.start();
-      return true;
-    } catch (error) {
-      speechRecognizer = null;
-      resolveSpeechEnd?.();
-      resolveSpeechEnd = null;
-      showToast(`录音已开始，但无法启动自动转写：${error.message}`);
-      return false;
-    }
-  }
-
   async function refreshTranscriptionStatus() {
     try { localTranscriptionReady = Boolean((await window.localWhisper?.status())?.ready); } catch { localTranscriptionReady = false; }
-    $("#transcriptionEngine").value = state.preferences.transcriptionEngine || (localTranscriptionReady ? "whisper" : "browser");
     $("#retryLocalTranscription").disabled = !localTranscriptionReady;
-    $("#transcriptionStatus").textContent = localTranscriptionReady ? "已内置 whisper.cpp + small.en；本地模式不上传音频、不需要 API Key。浏览器模式可能把语音发送给浏览器厂商。" : "未检测到本地语音组件；请使用完整离线包。本机仍可选择浏览器转写（可能联网）。";
+    $("#recordButton").disabled = !localTranscriptionReady;
+    $("#transcriptionStatus").textContent = localTranscriptionReady ? "已内置 whisper.cpp + small.en。结束录音后会自动在本机转写，不上传音频，也不需要 API Key。" : "未检测到本地语音组件。请使用包含 Whisper 的完整离线包；浏览器转写已停用。";
   }
 
   async function transcribeLocalRecording(session = recordingSession) {
@@ -1322,37 +1299,25 @@
     const controller = new AbortController();
     localTranscriptionController = controller;
     $("#cancelLocalTranscription").classList.remove("hidden");
-    $("#saveSpeaking").disabled = true;
     $("#retryLocalTranscription").disabled = true;
-    $("#transcriptionEngine").disabled = true;
     $("#speakingTranscript").disabled = true;
     $("#recordHint").textContent = "Whisper 正在本机处理录音……长录音可能需要几分钟，可取消；录音不会上传。";
     try {
       const text = await window.localWhisper.transcribe(blob,controller.signal);
       if (session !== recordingSession) return;
       $("#speakingTranscript").value = text;
-      $("#recordHint").textContent = "本地转写完成。请回听核对，再保存录音与文字稿；语音识别仍可能出错。";
+      $("#recordHint").textContent = "本地转写完成并自动保存。请回听核对；手动修改也会继续自动保存。";
     } catch (error) {
-      if (session === recordingSession) $("#recordHint").textContent = error.name === "AbortError" ? "已取消转写，录音和已有文字仍保留，可保存或重试。" : `本地转写失败：${error.message}。录音仍保留，可保存或重试。`;
+      if (session === recordingSession) $("#recordHint").textContent = error.name === "AbortError" ? "已取消转写，录音和已有文字会自动保留，也可重新转写。" : `本地转写失败：${error.message}。录音会自动保留，可重新转写。`;
     } finally {
       if (session === recordingSession) {
         recordingBusy = false; localTranscriptionController = null;
-        $("#saveSpeaking").disabled = false;
         $("#retryLocalTranscription").disabled = !localTranscriptionReady;
-        $("#transcriptionEngine").disabled = false;
         $("#speakingTranscript").disabled = false;
         $("#cancelLocalTranscription").classList.add("hidden");
       }
     }
-  }
-
-  function stopRecordingTranscription() {
-    speechStopRequested = true;
-    clearTimeout(speechRestartTimer);
-    speechRestartTimer = null;
-    if (!speechRecognizer) return Promise.resolve();
-    try { speechRecognizer.stop(); } catch { resolveSpeechEnd?.(); }
-    return Promise.race([speechEndPromise, new Promise(resolve => setTimeout(resolve, 2000))]);
+    if (session === recordingSession && recordingBlob) await saveSpeaking({ silent: true });
   }
 
   async function toggleRecording() {
@@ -1362,8 +1327,7 @@
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return showToast("当前浏览器不支持录音，请换用新版 Edge 或 Chrome");
-    captureUsesWhisper = $("#transcriptionEngine").value === "whisper";
-    if (captureUsesWhisper && !localTranscriptionReady) return showToast("本地组件缺失，请使用完整离线包，或手动选择浏览器转写");
+    if (!localTranscriptionReady) return showToast("本地 Whisper 组件缺失，请使用完整离线包");
     if ((recordingBlob || $("#speakingTranscript").value.trim()) && !confirm("重新录音会替换当前编辑区的录音与文字稿。已保存的历史记录会保留到你再次保存为止，是否继续？")) return;
     recordingBusy = true;
     const session = ++recordingSession;
@@ -1372,6 +1336,7 @@
       if (session !== recordingSession) { stream.getTracks().forEach(track => track.stop()); return; }
       recordingStream = stream;
       recordingBlob = null;
+      recordingBlobDirty = false;
       $("#speakingTranscript").value = "";
       const playback = $("#speakingPlayback");
       if (playback.src?.startsWith("blob:")) URL.revokeObjectURL(playback.src);
@@ -1385,19 +1350,17 @@
       recorder.ondataavailable = event => { if (event.data.size) recordingChunks.push(event.data); };
       recorder.onstop = finishRecording;
       recorder.start();
-      const transcriptionStarted = !captureUsesWhisper && startRecordingTranscription();
-      $("#transcriptionEngine").disabled = true;
       recordSeconds = 0;
       $("#recordPulse span").textContent = "00:00";
-      $("#saveSpeaking").disabled = true;
+      $("#speakingSaveStatus").textContent = "正在录音，结束转写后自动保存…";
       $("#recordPulse").classList.add("is-recording");
       $("#recordButton").textContent = "结束录音与转写";
-      $("#recordHint").textContent = captureUsesWhisper ? "正在本地录音；结束后由 Whisper 离线转写，不会上传音频。" : transcriptionStarted ? "正在录音并实时转写；浏览器语音服务可能联网" : "正在录音；当前浏览器未能启动自动转写";
+      $("#recordHint").textContent = "正在录音；结束后由 Whisper 在本机一次性转写，不会上传音频。";
       clearInterval(recordInterval);
       recordInterval = setInterval(() => {
         recordSeconds += 1;
         $("#recordPulse span").textContent = formatClock(recordSeconds);
-        if (captureUsesWhisper && recordSeconds >= 480 && recorder?.state === "recording") recorder.stop();
+        if (recordSeconds >= 480 && recorder?.state === "recording") recorder.stop();
       }, 1000);
     } catch (error) {
       recordingStream?.getTracks().forEach(track => track.stop());
@@ -1411,27 +1374,19 @@
   async function finishRecording() {
     const session = recordingSession;
     recordingBusy = true;
-    const transcriptionStopped = stopRecordingTranscription();
     clearInterval(recordInterval);
     recordingStream?.getTracks().forEach(track => track.stop());
     recordingBlob = new Blob(recordingChunks, { type: recorder.mimeType || "audio/webm" });
+    recordingBlobDirty = true;
     const url = URL.createObjectURL(recordingBlob);
     $("#speakingPlayback").src = url;
     $("#speakingPlayback").classList.remove("hidden");
     $("#downloadRecording").classList.remove("hidden");
     $("#recordPulse").classList.remove("is-recording");
     $("#recordButton").textContent = "重新录音并转写";
-    $("#recordHint").textContent = "正在收尾转写，请稍候……";
-    await transcriptionStopped;
+    $("#recordHint").textContent = "录音已结束，正在启动本地 Whisper 转写……";
     if (session !== recordingSession) return;
-    // Freeze this capture before the user edits or loads another record.
-    if (speechRecognizer) { speechRecognizer.onresult = null; speechRecognizer.onend = null; speechRecognizer.onerror = null; try { speechRecognizer.abort(); } catch {} speechRecognizer = null; }
-    resolveSpeechEnd?.(); resolveSpeechEnd = null;
-    if (captureUsesWhisper) { await transcribeLocalRecording(session); return; }
-    recordingBusy = false;
-    $("#transcriptionEngine").disabled = false;
-    $("#saveSpeaking").disabled = false;
-    $("#recordHint").textContent = "录音与文字稿已就绪；点击“保存录音与文字稿”即可一起永久保存";
+    await transcribeLocalRecording(session);
   }
 
   function renderSpeakingHistory() {
@@ -1455,15 +1410,10 @@
   function resetSpeakingMedia() {
     localTranscriptionController?.abort(); localTranscriptionController = null;
     $("#cancelLocalTranscription").classList.add("hidden");
-    $("#transcriptionEngine").disabled = false;
     $("#retryLocalTranscription").disabled = !localTranscriptionReady;
     $("#speakingTranscript").disabled = false;
     recordingSession += 1;
     recordingBusy = false;
-    if (speechRecognizer) { speechRecognizer.onresult = null; speechRecognizer.onend = null; speechRecognizer.onerror = null; }
-    stopRecordingTranscription();
-    speechRecognizer = null;
-    resolveSpeechEnd?.(); resolveSpeechEnd = null;
     clearInterval(recordInterval);
     if (recorder?.state === "recording") {
       recorder.onstop = null;
@@ -1474,6 +1424,7 @@
     recorder = null;
     recordingChunks = [];
     recordingBlob = null;
+    recordingBlobDirty = false;
     const playback = $("#speakingPlayback");
     if (playback.src?.startsWith("blob:")) URL.revokeObjectURL(playback.src);
     playback.pause();
@@ -1481,13 +1432,15 @@
     playback.load();
     playback.classList.add("hidden");
     $("#downloadRecording").classList.add("hidden");
-    $("#saveSpeaking").disabled = false;
+    $("#recordButton").disabled = !localTranscriptionReady;
     $("#recordPulse").classList.remove("is-recording");
     $("#recordButton").textContent = "开始录音并转写";
     $("#recordHint").textContent = "首次使用需允许麦克风；本地 Whisper 会在录音结束后自动生成文字稿";
   }
 
-  function newSpeaking() {
+  async function newSpeaking(skipAutosave = false) {
+    if (skipAutosave) clearTimeout(speakingAutosaveTimer); else await flushSpeakingAutosave();
+    speakingAutosaveTimer = null;
     resetSpeakingMedia();
     activeSpeakingId = null;
     $("#speakingPrompt").value = "";
@@ -1496,13 +1449,14 @@
     $("#speakingReview").textContent = "";
     $("#speakingReview").classList.add("hidden");
     $("#deleteSpeaking").classList.add("hidden");
-    $("#saveSpeaking").textContent = "保存录音与文字稿";
+    $("#speakingSaveStatus").textContent = "录音、文字稿与修改会自动保存到本机";
     recordSeconds = 0;
     $("#recordPulse span").textContent = "00:00";
     renderSpeakingHistory();
   }
 
-  function loadSpeaking(id) {
+  async function loadSpeaking(id) {
+    await flushSpeakingAutosave();
     const item = state.speaking.find(entry => entry.id === id);
     if (!item) return;
     resetSpeakingMedia();
@@ -1514,6 +1468,7 @@
       const [header, encoded] = item.audio.split(",");
       try {
         recordingBlob = new Blob([Uint8Array.from(atob(encoded), char => char.charCodeAt(0))], { type: header.slice(5).replace(/;base64$/, "") });
+        recordingBlobDirty = false;
         $("#speakingPlayback").src = URL.createObjectURL(recordingBlob);
         $("#speakingPlayback").classList.remove("hidden");
         $("#downloadRecording").classList.remove("hidden");
@@ -1525,7 +1480,7 @@
     $("#speakingReview").textContent = "";
     $("#speakingReview").classList.add("hidden");
     $("#deleteSpeaking").classList.remove("hidden");
-    $("#saveSpeaking").textContent = "更新录音与文字稿";
+    $("#speakingSaveStatus").textContent = `上次自动保存 ${new Date(item.updatedAt).toLocaleString()}`;
     renderSpeakingHistory();
   }
 
@@ -1533,7 +1488,7 @@
     if (!id || !confirm("确定删除这条口语练习及其内嵌录音吗？另行下载的副本和历史备份不受影响。")) return;
     state.speaking = state.speaking.filter(entry => entry.id !== id);
     saveState();
-    if (activeSpeakingId === id) newSpeaking(); else renderSpeakingHistory();
+    if (activeSpeakingId === id) newSpeaking(true); else renderSpeakingHistory();
     showToast("口语记录已删除");
   }
 
@@ -1546,17 +1501,16 @@
     });
   }
 
-  async function saveSpeaking() {
-    if (recordingBusy || recorder?.state === "recording") { showToast("请先结束录音，等待转写收尾后再保存"); return false; }
+  async function saveSpeaking({ silent = false } = {}) {
+    if (recordingBusy || recorder?.state === "recording") return false;
     const session = recordingSession;
     const prompt = $("#speakingPrompt").value.trim();
     const transcript = $("#speakingTranscript").value.trim();
-    if (!prompt && !transcript && !recordingBlob) return showToast("请先输入话题、录音或整理文字稿");
+    if (!prompt && !transcript && !recordingBlob) return false;
     const existing = state.speaking.find(entry => entry.id === activeSpeakingId);
-    $("#saveSpeaking").disabled = true;
     try {
       if (recordingBlob?.size > 16 * 1024 * 1024) throw new Error("单次录音超过 16 MB，请先下载备份并分段录制");
-      const audio = recordingBlob ? await audioBlobToDataUrl(recordingBlob) : existing?.audio || "";
+      const audio = recordingBlob ? (recordingBlobDirty || !existing?.audio ? await audioBlobToDataUrl(recordingBlob) : existing.audio) : existing?.audio || "";
       if (session !== recordingSession) return false;
       const record = { id: activeSpeakingId || uid(), part: $("#speakingPart").value, prompt, transcript, audio, duration: recordSeconds, createdAt: existing?.createdAt || new Date().toISOString(), updatedAt: new Date().toISOString(), review: existing?.review || "", reviewInput: existing?.reviewInput || null, topicTitle: existing?.topicTitle || reviewTopicTitle(existing?.review), reviewedAt: existing?.reviewedAt || "" };
       record.punctuatedTranscript = existing?.punctuatedTranscript || "";
@@ -1565,17 +1519,33 @@
       if (index >= 0) state.speaking[index] = record; else state.speaking.push(record);
       activeSpeakingId = record.id;
       await saveState(true);
+      recordingBlobDirty = false;
       $("#deleteSpeaking").classList.remove("hidden");
-      $("#saveSpeaking").textContent = "更新录音与文字稿";
+      $("#speakingSaveStatus").textContent = `已自动保存 ${new Date().toLocaleTimeString()}`;
       renderSpeakingHistory();
-      showToast(audio ? "录音与文字稿已一起永久保存到本地" : "文字稿已永久保存到本地");
+      if (!silent) showToast(audio ? "录音与文字稿已一起永久保存到本地" : "文字稿已永久保存到本地");
       return true;
     } catch (error) {
-      showToast(`口语保存失败：${error.message}。请保留页面并重试或下载录音备份。`);
+      $("#speakingSaveStatus").textContent = `自动保存失败：${error.message}`;
+      if (!silent) showToast(`口语保存失败：${error.message}。请保留页面并重试或下载录音备份。`);
       return false;
-    } finally {
-      if (session === recordingSession) $("#saveSpeaking").disabled = false;
     }
+  }
+
+  function scheduleSpeakingAutosave() {
+    $("#speakingSaveStatus").textContent = "正在等待自动保存…";
+    clearTimeout(speakingAutosaveTimer);
+    speakingAutosaveTimer = setTimeout(() => {
+      speakingAutosaveTimer = null;
+      saveSpeaking({ silent: true });
+    }, 700);
+  }
+
+  async function flushSpeakingAutosave() {
+    if (!speakingAutosaveTimer) return true;
+    clearTimeout(speakingAutosaveTimer);
+    speakingAutosaveTimer = null;
+    return saveSpeaking({ silent: true });
   }
 
   function downloadBlob(blob, filename) {
@@ -1670,7 +1640,6 @@
   }
 
   function bindEvents() {
-    $("#transcriptionEngine").addEventListener("change", () => { state.preferences.transcriptionEngine = $("#transcriptionEngine").value; saveState(); });
     $("#cancelLocalTranscription").addEventListener("click", () => localTranscriptionController?.abort());
     $("#retryLocalTranscription").addEventListener("click", () => {
       if (recordingBusy || recorder?.state === "recording") return;
@@ -1680,12 +1649,12 @@
     $("#openWritingReview").addEventListener("click", () => openReviewWorkspace("writing"));
     $("#openSpeakingReview").addEventListener("click", () => openReviewWorkspace("speaking"));
     $("#closeReviewWorkspace").addEventListener("click", () => routeTo(reviewWorkspaceSelection?.module || "writing"));
-    $("#editReviewSource").addEventListener("click", () => {
+    $("#editReviewSource").addEventListener("click", async () => {
       const { module, id } = reviewWorkspaceSelection || {};
       if (!id) return;
       const hasDraft = module === "writing" ? $("#writingEssay").value.trim() || $("#writingPrompt").value.trim() : $("#speakingTranscript").value.trim() || recordingBlob;
       if (hasDraft && !confirm("打开这条记录会替换当前编辑区。请确认当前草稿已保存，是否继续？")) return;
-      if (module === "writing") loadWriting(id); else loadSpeaking(id);
+      if (module === "writing") await loadWriting(id); else await loadSpeaking(id);
       routeTo(module);
     });
     $("#generatePunctuation").addEventListener("click", generatePunctuation);
@@ -1698,17 +1667,17 @@
     $("#exitApp").addEventListener("click", async () => {
       if (!confirm("确定退出 English Learning Path 吗？已保存的本地记录不会丢失。")) return;
       try {
+        await Promise.all([flushWritingAutosave(), flushSpeakingAutosave()]);
         await fetch("/api/app/shutdown", { method: "POST" });
         document.body.innerHTML = '<main style="max-width:680px;margin:15vh auto;padding:40px;font-family:Segoe UI,sans-serif;color:#18332d"><h1>English Learning Path 已退出</h1><p>现在可以关闭这个浏览器标签页。</p></main>';
       } catch {
         showToast("当前不是通过便携启动器运行，无需退出服务");
       }
     });
-    $("#newWriting").addEventListener("click", newWriting);
-    $("#saveWriting").addEventListener("click", saveWriting);
+    $("#newWriting").addEventListener("click", () => newWriting());
     $("#deleteWriting").addEventListener("click", () => deleteWritingRecord(activeWritingId));
     $("#writingEssay").addEventListener("input", updateWordCount);
-    $("#writingPrompt").addEventListener("input", () => $("#saveStatus").textContent = "有未保存的修改");
+    $("#writingPrompt").addEventListener("input", scheduleWritingAutosave);
     $("#writingPromptImageInput").addEventListener("change", event => {
       const input = event.target;
       queueWritingPromptImages(input.files).finally(() => { input.value = ""; });
@@ -1717,25 +1686,28 @@
       const files = [...(event.clipboardData?.items || [])].filter(item => item.kind === "file" && item.type.startsWith("image/")).map(item => item.getAsFile()).filter(Boolean);
       if (files.length) queueWritingPromptImages(files);
     });
-    $("#writingMinutes").addEventListener("change", resetWritingTimer);
+    $("#writingMinutes").addEventListener("change", () => { resetWritingTimer(); scheduleWritingAutosave(); });
     $("#writingType").addEventListener("change", () => {
       const type = $("#writingType").value;
       if (type.startsWith("Task 1")) $("#writingMinutes").value = "20";
       else if (type === "Task 2") $("#writingMinutes").value = "40";
+      else if (type === "自由写作") $("#writingMinutes").value = "0";
       resetWritingTimer();
-      $("#saveStatus").textContent = "有未保存的修改";
+      scheduleWritingAutosave();
     });
     $("#toggleTimer").addEventListener("click", toggleWritingTimer);
     $("#reviewWriting").addEventListener("click", reviewWriting);
-    $("#addWritingMistake").addEventListener("click", () => openMistakeComposer("writing", `写作复盘 · ${$("#writingType").value}`, `题目：${$("#writingPrompt").value.trim() || "未填写"}\n\n需要复盘的问题：\n下次修改：`, activeWritingId ? { module: "writing", id: activeWritingId } : null));
+    $("#addWritingMistake").addEventListener("click", () => openMistakeComposer("writing", `写作复盘 · ${$("#writingType").value}`, `题目：${$("#writingPrompt").value.trim() || "未填写"}\n\n确定语法错误：\n可选优化建议：\n可复用语料：\n重写后的变化：`, activeWritingId ? { module: "writing", id: activeWritingId } : null));
     $("#recordButton").addEventListener("click", toggleRecording);
     $("#downloadRecording").addEventListener("click", () => recordingBlob && downloadBlob(recordingBlob, `EnglishLearnPath-speaking-${Date.now()}.webm`));
     $("#speechLanguage").addEventListener("change", () => { state.preferences.speechLanguage = $("#speechLanguage").value; saveState(); });
-    $("#newSpeaking").addEventListener("click", newSpeaking);
-    $("#saveSpeaking").addEventListener("click", saveSpeaking);
+    $("#newSpeaking").addEventListener("click", () => newSpeaking());
+    $("#speakingPrompt").addEventListener("input", scheduleSpeakingAutosave);
+    $("#speakingTranscript").addEventListener("input", scheduleSpeakingAutosave);
+    $("#speakingPart").addEventListener("change", scheduleSpeakingAutosave);
     $("#deleteSpeaking").addEventListener("click", () => deleteSpeakingRecord(activeSpeakingId));
     $("#reviewSpeaking").addEventListener("click", reviewSpeaking);
-    $("#addSpeakingMistake").addEventListener("click", () => openMistakeComposer("speaking", `口语复盘 · ${$("#speakingPrompt").value.trim() || "自由表达"}`, `文字稿：${$("#speakingTranscript").value.trim() || "未填写"}\n\n表达问题：\n下次优化：`, activeSpeakingId ? { module: "speaking", id: activeSpeakingId } : null));
+    $("#addSpeakingMistake").addEventListener("click", () => openMistakeComposer("speaking", `口语复盘 · ${$("#speakingPrompt").value.trim() || "自由表达"}`, `文字稿：${$("#speakingTranscript").value.trim() || "未填写"}\n\n回听与转写核对：\n确定问题：\n可复用表达：\n重说后的变化：`, activeSpeakingId ? { module: "speaking", id: activeSpeakingId } : null));
     $("#saveManualPlan").addEventListener("click", saveManualPlan);
     $("#generateAiPlan").addEventListener("click", generateAiPlan);
     $("#deletePlan").addEventListener("click", () => {
@@ -1776,7 +1748,7 @@
       activeWritingId = activeSpeakingId = null;
       try {
         await saveState();
-        renderAll(); newWriting(); newSpeaking(); showToast("永久数据文件已清空，滚动备份已保留");
+        renderAll(); newWriting(true); newSpeaking(true); showToast("永久数据文件已清空，滚动备份已保留");
       } catch {
         showToast("清空失败，原数据文件未被确认覆盖");
       }

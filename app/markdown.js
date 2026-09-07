@@ -51,7 +51,7 @@
       const isHeading = level && node.nodeName === `H${level}`;
       if (isHeading) {
         seenHeading = true;
-        skipCorrection = Boolean((options.dedupeCorrections && /逐[句条].*(?:纠错|修改|修正)/.test(node.textContent)) || (options.hideTranscript && /转写整理稿/.test(node.textContent)));
+        skipCorrection = Boolean((options.dedupeCorrections && /(?:逐[句条].*(?:纠错|修改|修正)|确定语法错误)/.test(node.textContent)) || (options.hideTranscript && /转写整理稿/.test(node.textContent)));
         if (skipCorrection) { card = null; continue; }
       }
       if (skipCorrection) continue;

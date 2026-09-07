@@ -101,8 +101,8 @@
             <div class="writing-prompt-image-tools"><label class="button button-quiet file-button">选择题目图片<input id="writingPromptImageInput" type="file" accept="image/*" multiple></label><span>支持图表、流程图、地图或题目截图，最多 6 张</span></div>
             <div id="writingPromptImagePreview" class="writing-prompt-images empty-state">尚未添加题目图片</div>
             <label class="field essay-field"><span>正文</span><textarea id="writingEssay" placeholder="Start writing here..." spellcheck="true"></textarea></label>
-            <div class="editor-footer"><span><strong id="wordCount">0</strong> words</span><span id="saveStatus">尚未保存</span></div>
-            <div class="button-row"><button id="saveWriting" class="button button-primary">保存到本机</button><button id="reviewWriting" class="button button-secondary ai-required">AI 写作反馈</button><button id="addWritingMistake" class="button button-quiet">加入写作复盘本</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div>
+            <div class="editor-footer"><span><strong id="wordCount">0</strong> words</span><span id="saveStatus">内容会自动保存到本机</span></div>
+            <div class="button-row writing-actions"><button id="reviewWriting" class="button button-primary ai-required">AI 写作反馈</button><button id="addWritingMistake" class="button button-quiet">记录本题复盘</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div>
             <p class="privacy-hint">AI 批改会使用学习计划中已保存的现有水平、目标水平和重点；请先在“学习计划”中填写并保存。</p>
             <button id="openWritingReview" class="button button-secondary review-open-button">打开本题复盘 · 题目 / 原稿 / 修改</button>
             <div id="writingReview" class="ai-output hidden"></div>
@@ -112,7 +112,7 @@
 
       <section class="page" data-page="speaking">
         <div class="page-intro panel compact-panel">
-          <div><span class="kicker">SPEAKING ROOM</span><h2>口语练习</h2><p>一次录音，自动转写。完整包默认在录音结束后离线识别；校对后点击“保存录音与文字稿”，两者一起永久保存到本地。只有文字稿可按需交给 AI 评价。</p></div>
+          <div><span class="kicker">SPEAKING ROOM</span><h2>口语练习</h2><p>一次录音，自动转写。完整包在录音结束后离线识别，并把录音与文字稿自动永久保存到本地；后续校对修改也会自动写盘。只有文字稿可按需交给 AI 评价。</p></div>
           <button id="newSpeaking" class="button button-primary">新建口语练习</button>
         </div>
         <div class="speaking-grid">
@@ -128,12 +128,12 @@
           </div>
           <div class="panel transcript-panel">
             <div class="panel-title"><div><span class="kicker">TRANSCRIPT</span><h3>文字稿与复盘</h3></div></div>
-            <div class="transcription-toolbar"><label class="mini-field"><span>题型</span><select id="speakingPart"><option value="p1">Part 1</option><option value="p2">Part 2</option><option value="p3">Part 3</option><option value="free">自由表达</option></select></label><label class="mini-field"><span>转写语言</span><select id="speechLanguage"><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option></select></label><span class="integrated-transcription-note">随左侧录音自动转写</span></div>
-            <label class="field"><span>语音转写方式</span><select id="transcriptionEngine"><option value="whisper">本地 Whisper · 录音结束后离线转写</option><option value="browser">浏览器实时转写 · 可能联网</option></select></label>
+            <div class="transcription-toolbar"><label class="mini-field"><span>题型</span><select id="speakingPart"><option value="p1">Part 1</option><option value="p2">Part 2</option><option value="p3">Part 3</option><option value="free">自由表达</option></select></label><label class="mini-field"><span>转写语言</span><select id="speechLanguage"><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option></select></label><span class="integrated-transcription-note">录音结束后自动离线转写</span></div>
             <p id="transcriptionStatus" class="privacy-hint">正在检查本地语音组件……</p>
-            <div class="button-row"><button id="retryLocalTranscription" type="button" class="button button-secondary">用本地 Whisper 重新转写录音</button><button id="cancelLocalTranscription" type="button" class="button button-quiet hidden">取消转写</button></div>
-            <textarea id="speakingTranscript" class="transcript-area" placeholder="本地模式在录音结束后显示识别结果；浏览器模式实时显示。请回听核对，也可以手动修改或补充。"></textarea>
-            <div class="button-row"><button id="saveSpeaking" class="button button-primary">保存录音与文字稿</button><button id="reviewSpeaking" class="button button-secondary ai-required">AI 评价与修改</button><button id="addSpeakingMistake" class="button button-quiet">加入口语复盘本</button><button id="deleteSpeaking" class="button button-danger-quiet hidden">删除记录</button></div>
+            <div class="button-row transcription-actions"><button id="retryLocalTranscription" type="button" class="button button-secondary">重新转写本次录音</button><button id="cancelLocalTranscription" type="button" class="button button-quiet hidden">取消转写</button></div>
+            <textarea id="speakingTranscript" class="transcript-area" placeholder="录音结束后会自动显示本地 Whisper 识别结果。请回听核对，也可以手动修改或补充。"></textarea>
+            <p id="speakingSaveStatus" class="autosave-status">录音、文字稿与修改会自动保存到本机</p>
+            <div class="button-row speaking-actions"><button id="reviewSpeaking" class="button button-primary ai-required">AI 评价与修改</button><button id="addSpeakingMistake" class="button button-quiet">记录本题复盘</button><button id="deleteSpeaking" class="button button-danger-quiet hidden">删除记录</button></div>
             <p class="privacy-hint">AI 批改会使用学习计划中已保存的现有水平、目标水平和重点；未填写的项目会明确标为未提供。</p>
             <button id="openSpeakingReview" class="button button-secondary review-open-button">打开本题复盘 · 话题 / 录音 / 修改</button>
             <div id="speakingReview" class="ai-output hidden"></div>
@@ -158,10 +158,15 @@
             </div>
             <label class="field"><span>重点与补充信息</span><textarea id="planFocus" rows="4" placeholder="例如：重点提升写作论证和口语流利度；周末时间更多；每周完成一次计时写作……"></textarea></label>
             <div class="manual-targets">
-              <h4>手动计划：每天完成</h4>
-              <label><span>写作</span><input id="manualWriting" type="number" min="0" max="5" value="1"><small>篇</small></label>
-              <label><span>口语</span><input id="manualSpeaking" type="number" min="0" max="10" value="1"><small>次</small></label>
-              <label><span>错题复盘</span><input id="manualReview" type="number" min="0" max="240" value="30"><small>分钟</small></label>
+              <h4>手动计划：每日输出与复盘</h4>
+              <p>新练习保持少量，把更多时间留给核对反馈、积累语料和重写。</p>
+              <label><span>新写作</span><input id="manualWriting" type="number" min="0" max="1" value="1"><small>篇</small></label>
+              <label><span>新口语</span><input id="manualSpeaking" type="number" min="0" max="2" value="1"><small>次</small></label>
+              <label><span>写作精改</span><input id="manualWritingReview" type="number" min="0" max="1" value="1"><small>次</small></label>
+              <label><span>重写</span><input id="manualWritingRewrite" type="number" min="0" max="1" value="0"><small>篇</small></label>
+              <label><span>口语回听复盘</span><input id="manualSpeakingReview" type="number" min="0" max="1" value="1"><small>次</small></label>
+              <label><span>常用语料记忆</span><input id="manualLanguage" type="number" min="0" max="60" value="15"><small>分钟</small></label>
+              <label><span>错题与单词复盘</span><input id="manualReview" type="number" min="0" max="120" value="30"><small>分钟</small></label>
             </div>
             <div class="button-row"><button id="saveManualPlan" type="button" class="button button-primary">保存至考试日的手动计划</button><button id="generateAiPlan" type="button" class="button button-secondary ai-required">AI 生成考前计划</button></div>
             <div id="planResult" class="feedback-box hidden"></div>
@@ -212,7 +217,7 @@
           </section>
           <form id="aiSettings" class="panel settings-card">
             <div class="panel-title"><div><span class="kicker">OPENAI-COMPATIBLE</span><h3>AI 接口</h3></div><span id="settingsAiBadge" class="status-badge status-off">未连接</span></div>
-            <label class="field"><span>服务商预设</span><select id="aiProvider"><option value="deepseek" selected>DeepSeek（已有 DeepSeek Key 选这个）</option><option value="openai">OpenAI</option><option value="ollama">本地模型（Ollama 兼容）</option><option value="custom">其他 OpenAI 兼容服务</option></select><small>选择后会自动填写接口地址和建议模型；仍可手动修改。</small></label>
+            <label class="field"><span>服务商预设</span><select id="aiProvider"><option value="deepseek" selected>DeepSeek</option><option value="openai">OpenAI</option><option value="ollama">本地模型（Ollama 兼容）</option><option value="custom">其他 OpenAI 兼容服务</option></select><small>选择后会自动填写接口地址和建议模型；仍可手动修改。</small></label>
             <label class="field"><span>接口地址</span><input id="aiBaseUrl" type="url" value="https://api.deepseek.com" placeholder="https://api.deepseek.com" autocomplete="off"><small id="aiProviderHelp">DeepSeek 官方 OpenAI 兼容地址。程序会自动请求 /chat/completions。</small></label>
             <label class="field"><span>API Key</span><input id="aiApiKey" type="password" placeholder="填写后在本机加密保存" autocomplete="off"><small>使用 Windows 当前账户加密，保存在程序旁的 runtime-data 中；不进入学习备份、浏览器缓存或发布包。更换电脑或账户需重新输入。DeepSeek V4 批改默认使用非思考模式。</small></label>
             <label class="field"><span>模型名称</span><input id="aiModel" type="text" value="deepseek-v4-flash" placeholder="例如：deepseek-v4-flash" autocomplete="off"></label>

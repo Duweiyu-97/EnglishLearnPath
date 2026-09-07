@@ -64,7 +64,10 @@
     return mapped;
   }
 
-  function extract(markdown) {
+  const definiteWritingError = type => /(?:语法|拼写|词形|主谓一致|时态|冠词|单复数|介词|句法|标点|grammar|spelling|agreement|tense|article|plural|preposition|syntax|punctuation)/i.test(String(type || ""))
+    && !/(?:优化|更自然|更地道|高级|简洁|衔接|结构|论证|风格|表达建议|style|optional|polish)/i.test(String(type || ""));
+
+  function extract(markdown, definiteOnly = false) {
     const root = document.createElement("div");
     window.renderReviewMarkdown(root, markdown);
     const results = [];
@@ -99,11 +102,11 @@
       else if (pending && reasonLabel.test(label)) pending.explanation = value;
     });
     add(pending);
-    return results.slice(0, 100);
+    return (definiteOnly ? results.filter(item => definiteWritingError(item.type)) : results).slice(0, 100);
   }
 
-  window.renderReviewAnnotations = ({ original, markdown, originalElement, correctionsElement, countElement, noticeElement, punctuationOnly = false }) => {
-    const corrections = extract(markdown);
+  window.renderReviewAnnotations = ({ original, markdown, originalElement, correctionsElement, countElement, noticeElement, punctuationOnly = false, definiteOnly = false }) => {
+    const corrections = extract(markdown, definiteOnly);
     originalElement.replaceChildren();
     correctionsElement.replaceChildren();
     const ranges = [];
@@ -162,8 +165,8 @@
     });
     originalElement.append(document.createTextNode(original.slice(cursor)));
     countElement.textContent = String(ranges.length);
-    noticeElement.textContent = corrections.length ? `已定位 ${ranges.length} / ${corrections.length} 条 AI 修改。点击标红原文查看建议；标注不代表所有建议都是确定错误，请结合报告核对。` : "尚无可定位的逐句修改，原文保持完整。已有评价仍可在下方查看。";
-    if (!corrections.length) correctionsElement.textContent = "这份报告没有可识别的“原文—修改”条目。页面不会自行编造错误。";
+    noticeElement.textContent = corrections.length ? (definiteOnly ? `已定位 ${ranges.length} / ${corrections.length} 条确定语法错误。点击标红原文查看最小修改；可选优化只在报告中展示，不会标红。` : `已定位 ${ranges.length} / ${corrections.length} 条 AI 修改。点击标红原文查看建议。`) : (definiteOnly ? "没有可定位的确定语法错误。可选优化仍可在下方报告中查看，原文不会因此标红。" : "尚无可定位的逐句修改，原文保持完整。已有评价仍可在下方查看。");
+    if (!corrections.length) correctionsElement.textContent = definiteOnly ? "这份报告没有可识别的确定语法错误；页面不会把风格优化标成错误。" : "这份报告没有可识别的“原文—修改”条目。页面不会自行编造错误。";
     return { count: corrections.length };
   };
 })();

@@ -5,6 +5,7 @@ import vm from 'node:vm';
 const source = await readFile(new URL('../app/app.js', import.meta.url), 'utf8');
 const timers = new Set();
 function harness(initialState, localWhisper) {
+  localWhisper ||= { status: async () => ({ready:true}), transcribe: async () => 'Local Whisper result.' };
   const elements = new Map();
   let persisted;
   let failWrites = false;
@@ -74,7 +75,7 @@ function harness(initialState, localWhisper) {
     }
   });
   vm.runInContext(source.replace(/  initialize\(\);\s*\}\)\(\);\s*$/, `
-    globalThis.api = { refreshTranscriptionStatus, transcribeLocalRecording, bindEvents, toggleRecording, saveSpeaking, loadSpeaking, newSpeaking, loadWriting, todayPlanTasks, normalizePlanDay, reviewWriting, reviewSpeaking, reviewLearnerContext, reviewTopicTitle, practiceTitle,
+    globalThis.api = { refreshTranscriptionStatus, transcribeLocalRecording, bindEvents, toggleRecording, saveWriting, saveSpeaking, loadSpeaking, newSpeaking, loadWriting, todayPlanTasks, normalizePlanDay, normalizeAiPlanDay, reviewWriting, reviewSpeaking, reviewLearnerContext, reviewTopicTitle, practiceTitle,
       enableAi() { aiConnected = true; },
       get busy() { return recordingBusy; }, get blob() { return recordingBlob; },
       get state() { return state; }, set state(value) { state = normalizeState(value); }
@@ -92,7 +93,7 @@ try {
   let completeTranscription;
   const offline = harness(undefined, {status: async () => ({ready:true}), transcribe: () => new Promise(resolve => {completeTranscription = resolve;})});
   await offline.api.refreshTranscriptionStatus();
-  assert.equal(offline.element('#transcriptionEngine').value, 'whisper');
+  assert.match(offline.element('#transcriptionStatus').textContent, /自动在本机转写/);
   await offline.api.toggleRecording();
   assert.equal(offline.recognitionStarts(), 0, 'offline capture must not invoke browser speech services');
   await offline.api.toggleRecording();
@@ -107,7 +108,7 @@ try {
   assert.equal(offline.persisted().speaking[0].transcript, 'Offline result.');
   assert.match(offline.persisted().speaking[0].audio, /^data:audio/);
   const pending = offline.api.transcribeLocalRecording();
-  offline.api.newSpeaking();
+  await offline.api.newSpeaking();
   completeTranscription('Late obsolete result');
   await pending;
   assert.equal(offline.element('#speakingTranscript').value, '', 'late transcription must not overwrite a new practice');
@@ -119,24 +120,28 @@ try {
   assert.equal(h.api.practiceTitle({type:'Task 2', review:'- **主题**: 儿童成长环境的选择，属于社会与教育类话题。'}), '儿童成长环境的选择');
   assert.equal('listening' in h.api.state, false, 'fresh state must not create retired libraries');
   assert.equal('reading' in h.api.state, false);
-  assert.deepEqual(Object.keys(h.api.normalizePlanDay({ listening: 9, reading: 9, writing: 1, speaking: 2 })), ['writing', 'speaking', 'reviewMinutes', 'note']);
+  assert.deepEqual(Object.keys(h.api.normalizePlanDay({ listening: 9, reading: 9, writing: 5, speaking: 10 })), ['writing', 'speaking', 'writingReview', 'writingRewrite', 'speakingReview', 'languageMinutes', 'reviewMinutes', 'note']);
+  assert.equal(h.api.normalizePlanDay({writing:5}).writing, 1, 'new writing volume must be capped');
+  assert.equal(h.api.normalizePlanDay({speaking:10}).speaking, 2, 'new speaking volume must be capped');
+  assert.equal(JSON.stringify(h.api.normalizeAiPlanDay({writing:1,speaking:1})), JSON.stringify({writing:1,speaking:1,writingReview:1,writingRewrite:1,speakingReview:1,languageMinutes:10,reviewMinutes:0,note:''}), 'AI output must be expanded into a review-first loop');
   h.api.state = { listening: [{ id: 'keep-legacy' }], reading: [{ id: 'keep-old' }], writings: [], speaking: [] };
+  await h.api.refreshTranscriptionStatus();
   await h.api.toggleRecording();
-  assert.equal(h.recognitionStarts(), 1, 'one recording click must start transcription');
-  assert.equal(h.element('#saveSpeaking').disabled, true, 'cannot save incomplete audio');
+  assert.equal(h.recognitionStarts(), 0, 'browser speech recognition must never start');
+  assert.match(h.element('#speakingSaveStatus').textContent, /结束转写后自动保存/);
   await h.api.toggleRecording();
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.api.busy, false);
-  assert.equal(h.element('#speakingTranscript').value, 'This is the final sentence.');
+  assert.equal(h.element('#speakingTranscript').value, 'Local Whisper result.');
   assert.equal(await h.api.saveSpeaking(), true);
   const saved = h.persisted().speaking[0];
   assert.equal(h.persisted().listening[0].id, 'keep-legacy', 'normal saves must preserve opaque old data');
   assert.equal(h.persisted().reading[0].id, 'keep-old');
   assert.match(saved.audio, /^data:audio\/webm;codecs=opus;base64,/);
-  assert.equal(saved.transcript, 'This is the final sentence.');
+  assert.equal(saved.transcript, 'Local Whisper result.');
 
   const reloaded = harness(h.persisted());
-  reloaded.api.loadSpeaking(saved.id);
+  await reloaded.api.loadSpeaking(saved.id);
   assert.equal(await reloaded.api.blob.text(), 'test-audio-payload', 'history must restore the audio bytes');
   assert.equal(reloaded.element('#speakingTranscript').value, saved.transcript);
   assert.equal(await reloaded.api.saveSpeaking(), true, 'resaving history must retain its audio');
@@ -145,7 +150,7 @@ try {
   assert.equal(await reloaded.api.saveSpeaking(), false, 'disk failure must not report success');
 
   const legacy = harness({ speaking: [{ id: 'legacy', transcript: 'Old text', prompt: '', duration: 2 }] });
-  legacy.api.loadSpeaking('legacy');
+  await legacy.api.loadSpeaking('legacy');
   assert.equal(legacy.api.blob, null);
   assert.equal(legacy.element('#speakingTranscript').value, 'Old text');
 
@@ -155,8 +160,13 @@ try {
     assert.equal(h.element('#writingMinutes').value, minutes);
     assert.equal(h.element('#writingTimer').textContent, `${minutes}:00`);
   }
+  h.element('#writingType').value = '自由写作';
+  h.element('#writingType').events.change();
+  assert.equal(h.element('#writingMinutes').value, '0');
+  assert.equal(h.element('#writingTimer').textContent, '00:00');
+  assert.equal(h.element('#toggleTimer').textContent, '开始正计时');
   h.api.state.writings.push({ id: 'custom', type: 'Task 1 Academic', minutes: 60, prompt: 'Saved', essay: '', updatedAt: new Date().toISOString() });
-  h.api.loadWriting('custom');
+  await h.api.loadWriting('custom');
   assert.equal(h.element('#writingMinutes').value, '60', 'history must preserve the saved duration');
   h.api.state.studyPlan = { profile: { currentLevel: '写作 5.5，口语 6.0', targetLevel: '写作 7.0，口语 7.5', focus: '论证与自然表达' } };
   h.api.enableAi();
@@ -171,9 +181,21 @@ try {
     assert.doesNotMatch(request.messages[0].content, /6.0–6.5/);
     assert.doesNotMatch(request.messages[0].content, /批改原则补充|写作修订规则|口语修订规则/);
   }
+  assert.match(h.chatRequests[0].messages[0].content, /只有客观、明确/);
+  assert.match(h.chatRequests[0].messages[0].content, /可选优化建议/);
+  assert.match(h.chatRequests[1].messages[0].content, /本地 Whisper/);
   h.api.state.studyPlan = null;
   assert.match(h.api.reviewLearnerContext('写作'), /现有水平（用户自述）：未提供/);
   assert.match(h.api.reviewLearnerContext('写作'), /目标水平（用户设定）：未提供/);
+  const autosave = harness();
+  autosave.element('#writingEssay').value = 'Autosaved writing draft.';
+  autosave.element('#writingEssay').events.input();
+  await new Promise(resolve => setTimeout(resolve, 750));
+  assert.equal(autosave.persisted().writings[0].essay, 'Autosaved writing draft.');
+  autosave.element('#speakingTranscript').value = 'Autosaved speaking draft.';
+  autosave.element('#speakingTranscript').events.input();
+  await new Promise(resolve => setTimeout(resolve, 750));
+  assert.equal(autosave.persisted().speaking[0].transcript, 'Autosaved speaking draft.');
   console.log('Speaking capture/transcript/disk persistence/reload/failure and writing timer regression tests passed.');
 } finally {
   for (const timer of timers) { clearTimeout(timer); clearInterval(timer); }

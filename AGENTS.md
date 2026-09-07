@@ -25,3 +25,9 @@ When the user corrects an implementation or workflow, fix the current issue and 
 [UI] Place compact delete controls inside the top-right of history and notebook cards, reserving title space and overriding generic button height so controls never overlap text or stretch with the header.
 [CODE] Match review quotations across typographic hyphen, quote and whitespace variants using offsets into the untouched source; reject ambiguous or lexically different matches rather than inventing a location.
 [WORKFLOW] Pin CI runner families to required compiler generations and verify the entire remote build and artifact upload before calling CI fixed; a local build does not validate a moving hosted image.
+[UI] When one bundled transcription engine is the supported path, expose one record-stop-transcribe flow and do not retain a competing browser transcription mode.
+[UI] A no-limit writing session uses a visible count-up timer instead of an infinity placeholder or a disabled timing action.
+[ARCH] Study plans must cap new output volume and prioritize review, reusable-language study, and rewriting as explicit tasks.
+[CODE] Inline writing corrections are reserved for definite grammar, spelling, or mechanical errors; stylistic improvements must appear separately and must not mark the source as wrong.
+[UI] Keep action groups and media controls visibly separated from adjacent text areas, previews, and helper text at every responsive width.
+[WORKFLOW] Writing and speaking practice records autosave after meaningful edits and after transcription; do not require a separate save button before review or navigation.
