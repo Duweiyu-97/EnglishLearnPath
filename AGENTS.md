@@ -32,3 +32,4 @@ When the user corrects an implementation or workflow, fix the current issue and 
 [UI] Keep action groups and media controls visibly separated from adjacent text areas, previews, and helper text at every responsive width.
 [WORKFLOW] Writing and speaking practice records autosave after meaningful edits and after transcription; do not require a separate save button before review or navigation.
 [ARCH] Writing prompt images must be sent to a vision-capable model as real image inputs; never silently reduce an image-based Task 1 review to text-only guessing.
+[WORKFLOW] Windows release packages must include a visible stop-service executable that can end leftover launcher processes before users delete or replace an extracted version.

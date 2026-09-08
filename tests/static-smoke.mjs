@@ -3,6 +3,8 @@ import { readFile } from "node:fs/promises";
 
 const html = await readFile(new URL("../app/index.html", import.meta.url), "utf8");
 const script = await readFile(new URL("../app/app.js", import.meta.url), "utf8");
+const buildScript = await readFile(new URL("../build-portable.ps1", import.meta.url), "utf8");
+const stopper = await readFile(new URL("../launcher/cmd/stopper/main_windows.go", import.meta.url), "utf8");
 
 const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map(match => match[1]);
 assert.equal(new Set(ids).size, ids.length, "index.html contains duplicate ids");
@@ -32,6 +34,8 @@ assert.match(script, /不得据此扣分/, "AI review must not penalize ASR punc
 assert.match(script, /不要修改或覆盖页面上的原始转写/, "AI review must preserve original transcript");
 assert.match(script, /至少 40% 的可用时间安排给复盘/, "AI plans must prioritize review over task volume");
 assert.match(script, /只有客观、明确、在当前语境下无合理争议/, "writing review must only mark definite errors");
+assert.match(buildScript, /结束学习中心\.exe/, "Windows package must include a visible stop-service executable");
+assert.match(stopper, /exec\.Command\("taskkill\.exe", "\/F", "\/IM", launcherImageName\)/, "stopper must target only the packaged launcher image");
 
 
 console.log(`Static smoke test passed: ${ids.length} unique ids, ${new Set(selectors).size} referenced selectors.`);

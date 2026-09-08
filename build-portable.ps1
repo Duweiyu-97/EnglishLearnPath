@@ -18,10 +18,15 @@ $env:GOOS = "windows"
 $env:GOARCH = "amd64"
 Push-Location (Join-Path $RepoRoot "launcher")
 try {
-    go build -trimpath -ldflags "-s -w -H=windowsgui" -o (Join-Path $PackageRoot "启动学习中心.exe") .
+    go build -trimpath -ldflags "-s -w -H=windowsgui -X main.appVersion=$Version" -o (Join-Path $PackageRoot "启动学习中心.exe") .
+    go build -trimpath -ldflags "-s -w -H=windowsgui" -o (Join-Path $PackageRoot "结束学习中心.exe") ./cmd/stopper
 }
 finally {
     Pop-Location
+}
+
+foreach ($Executable in @('启动学习中心.exe','结束学习中心.exe')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $PackageRoot $Executable))) { throw "完整包缺少程序：$Executable" }
 }
 
 Copy-Item -LiteralPath (Join-Path $RepoRoot "app") -Destination (Join-Path $PackageRoot "app") -Recurse

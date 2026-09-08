@@ -167,4 +167,17 @@ func TestRetiredResourceAPIsAreUnavailable(t *testing.T) {
 	}
 }
 
+func TestAppInfoUsesInjectedBuildVersion(t *testing.T) {
+	previous := appVersion
+	appVersion = "v-test-build"
+	t.Cleanup(func() { appVersion = previous })
+	mux := http.NewServeMux()
+	registerAPI(mux)
+	response := httptest.NewRecorder()
+	mux.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/app/info", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"version":"v-test-build"`) {
+		t.Fatalf("build version missing from app info: %d %s", response.Code, response.Body.String())
+	}
+}
+
 var timeNow = func() time.Time { return time.Now() }
