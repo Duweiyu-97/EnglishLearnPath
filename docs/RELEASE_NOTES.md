@@ -1,4 +1,13 @@
-# v0.4.1 · 自动保存与复盘优先版
+# v0.4.2 · DeepSeek 题图识别版
+
+## 本次新增
+
+- 写作批改现在会把题目图片作为真实多模态输入发送给已配置的兼容 API，不再要求模型根据文字猜图。
+- 使用 DeepSeek 官方地址时，纯文字反馈仍使用已配置的 `deepseek-v4-flash`；一旦本题含图片，该次请求自动切换到 `deepseek-v4-flash-vision-exp`，沿用同一枚 API Key。
+- 支持随题保存的 PNG、JPEG、GIF 与 WebP 图片，最多 6 张；图片与题目、正文在一次请求中完成分析。
+- 录音仍坚持本机 whisper.cpp 离线转写。DeepSeek 当前公开视觉模型不接受音频，应用不会把原始口语录音发送给 DeepSeek。
+
+## v0.4.1 基础改进
 
 本版继续只专注写作与口语，并修正实际使用流程：
 
@@ -13,7 +22,7 @@
 
 下载 **EnglishLearnPath-Windows-x64-Full-*.zip**，全部解压到有写入权限的普通文件夹，双击“启动学习中心.exe”。不要只下载 GitHub 的 Source code ZIP。Windows 10/11 x64；使用系统自带 Edge 或现代 Chrome；无需安装 Python、FFmpeg、VC 运行库或另外下载语音模型。
 
-整包包含学习中心、CPU 版 whisper.cpp、Whisper small.en 英语模型。默认本地转写：录音结束后离线识别，音频不上传，不需要语音 API Key。深度批改仍按需使用用户自己的 DeepSeek 等文字接口。速度取决于电脑，建议至少 4 GB 内存；单段支持 8 分钟以内。请回听核对，模型可能产生误识别。
+整包包含学习中心、CPU 版 whisper.cpp、Whisper small.en 英语模型。默认本地转写：录音结束后离线识别，音频不上传，不需要语音 API Key。深度批改按需使用用户自己的 DeepSeek 等接口，只有写作题图会随批改请求发送给视觉模型。速度取决于电脑，建议至少 4 GB 内存；单段支持 8 分钟以内。请回听核对，模型可能产生误识别。
 
 ## 第三方版权
 

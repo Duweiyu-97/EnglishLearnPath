@@ -103,7 +103,7 @@
             <label class="field essay-field"><span>正文</span><textarea id="writingEssay" placeholder="Start writing here..." spellcheck="true"></textarea></label>
             <div class="editor-footer"><span><strong id="wordCount">0</strong> words</span><span id="saveStatus">内容会自动保存到本机</span></div>
             <div class="button-row writing-actions"><button id="reviewWriting" class="button button-primary ai-required">AI 写作反馈</button><button id="addWritingMistake" class="button button-quiet">记录本题复盘</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div>
-            <p class="privacy-hint">AI 批改会使用学习计划中已保存的现有水平、目标水平和重点；请先在“学习计划”中填写并保存。</p>
+            <p class="privacy-hint">AI 批改会使用学习计划中已保存的现有水平、目标水平和重点。带题图时，图片会和题目、正文一起发送到你配置的 AI；DeepSeek 会自动使用视觉模型。</p>
             <button id="openWritingReview" class="button button-secondary review-open-button">打开本题复盘 · 题目 / 原稿 / 修改</button>
             <div id="writingReview" class="ai-output hidden"></div>
           </div>
@@ -221,7 +221,7 @@
             <label class="field"><span>接口地址</span><input id="aiBaseUrl" type="url" value="https://api.deepseek.com" placeholder="https://api.deepseek.com" autocomplete="off"><small id="aiProviderHelp">DeepSeek 官方 OpenAI 兼容地址。程序会自动请求 /chat/completions。</small></label>
             <label class="field"><span>API Key</span><input id="aiApiKey" type="password" placeholder="填写后在本机加密保存" autocomplete="off"><small>使用 Windows 当前账户加密，保存在程序旁的 runtime-data 中；不进入学习备份、浏览器缓存或发布包。更换电脑或账户需重新输入。DeepSeek V4 批改默认使用非思考模式。</small></label>
             <label class="field"><span>模型名称</span><input id="aiModel" type="text" value="deepseek-v4-flash" placeholder="例如：deepseek-v4-flash" autocomplete="off"></label>
-            <div class="notice"><strong>DeepSeek 怎么填？</strong><p>只有 DeepSeek API Key 时，选择上面的 DeepSeek 预设即可：接口地址为 <code>https://api.deepseek.com</code>，建议模型为 <code>deepseek-v4-flash</code>。模型名称可能随服务商更新，请以官方文档为准。</p></div>
+            <div class="notice"><strong>DeepSeek 怎么填？</strong><p>只有 DeepSeek API Key 时，选择上面的 DeepSeek 预设即可：普通文字反馈使用 <code>deepseek-v4-flash</code>；写作题目带图片时，程序会自动改用官方 <code>deepseek-v4-flash-vision-exp</code> 读取图片，不需要再配置一套 Key。录音仍只由本机 Whisper 转写，不会发送给 DeepSeek。</p></div>
             <div class="button-row"><button type="submit" class="button button-primary">保存并测试连接</button><button id="disconnectAi" type="button" class="button button-quiet">断开并删除已保存配置</button></div>
             <div id="aiTestResult" class="feedback-box hidden"></div>
           </form>

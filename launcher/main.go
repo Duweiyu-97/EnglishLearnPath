@@ -22,6 +22,7 @@ import (
 
 const (
 	maxRequest    = 1 << 20
+	maxAIRequest  = 48 << 20
 	maxAIResponse = 4 << 20
 	maxDataFile   = 128 << 20
 	dataFilename  = "EnglishLearnPath-data.json"
@@ -64,7 +65,7 @@ type diskStore struct {
 
 type chatMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"`
 }
 
 type chatRequest struct {
@@ -305,7 +306,7 @@ func handleAIDisconnect(w http.ResponseWriter, _ *http.Request) {
 
 func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	var input chatRequest
-	if err := decodeJSON(w, r, &input); err != nil {
+	if err := decodeJSONLimit(w, r, &input, maxAIRequest); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -313,15 +314,18 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "messages 数量无效")
 		return
 	}
+	hasImages := false
 	for _, message := range input.Messages {
 		if message.Role != "system" && message.Role != "user" && message.Role != "assistant" {
 			writeError(w, http.StatusBadRequest, "消息角色无效")
 			return
 		}
-		if len(message.Content) > 120000 {
-			writeError(w, http.StatusBadRequest, "单条消息过长")
+		messageHasImages, err := validateChatContent(message)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		hasImages = hasImages || messageHasImages
 	}
 	settings.RLock()
 	cfg := settings.value
@@ -329,6 +333,15 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	if !cfg.Connected {
 		writeError(w, http.StatusPreconditionFailed, "请先在设置页配置并测试 AI")
 		return
+	}
+	if hasImages {
+		base, _ := url.Parse(cfg.BaseURL)
+		if base != nil && strings.EqualFold(base.Hostname(), "api.deepseek.com") {
+			// DeepSeek accepts image content only on its dedicated vision model.
+			// Switch just this request so saved text-model settings and keys keep
+			// working for ordinary feedback.
+			cfg.Model = "deepseek-v4-flash-vision-exp"
+		}
 	}
 	maxTokens := input.MaxTokens
 	if maxTokens <= 0 || maxTokens > 8000 {
@@ -339,7 +352,62 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"content": content})
+	writeJSON(w, http.StatusOK, map[string]string{"content": content, "model": cfg.Model})
+}
+
+func validateChatContent(message chatMessage) (bool, error) {
+	switch content := message.Content.(type) {
+	case string:
+		if len(content) > 120000 {
+			return false, errors.New("单条消息过长")
+		}
+		return false, nil
+	case []any:
+		if message.Role != "user" {
+			return false, errors.New("只有用户消息可以包含图片")
+		}
+		textLength, imageCount := 0, 0
+		for _, rawPart := range content {
+			part, ok := rawPart.(map[string]any)
+			if !ok {
+				return false, errors.New("消息内容块无效")
+			}
+			switch partType, _ := part["type"].(string); partType {
+			case "text":
+				text, ok := part["text"].(string)
+				if !ok {
+					return false, errors.New("文字内容块无效")
+				}
+				textLength += len(text)
+			case "image_url":
+				image, ok := part["image_url"].(map[string]any)
+				imageURL, urlOK := image["url"].(string)
+				if !ok || !urlOK || !validImageURL(imageURL) {
+					return false, errors.New("图片内容块无效")
+				}
+				imageCount++
+			default:
+				return false, errors.New("不支持的消息内容块")
+			}
+		}
+		if textLength > 120000 || imageCount > 6 {
+			return false, errors.New("多模态消息内容过长或图片过多")
+		}
+		return imageCount > 0, nil
+	default:
+		return false, errors.New("消息内容无效")
+	}
+}
+
+func validImageURL(value string) bool {
+	lower := strings.ToLower(value)
+	for _, prefix := range []string{"data:image/png;base64,", "data:image/jpeg;base64,", "data:image/jpg;base64,", "data:image/gif;base64,", "data:image/webp;base64,"} {
+		if strings.HasPrefix(lower, prefix) {
+			return len(value) > len(prefix)
+		}
+	}
+	parsed, err := url.Parse(value)
+	return err == nil && (strings.EqualFold(parsed.Scheme, "http") || strings.EqualFold(parsed.Scheme, "https")) && parsed.Host != ""
 }
 
 func callChat(ctx context.Context, cfg aiConfig, messages []chatMessage, temperature float64, maxTokens int, connectionTest bool) (string, error) {
@@ -664,7 +732,11 @@ func (s *diskStore) persistConfigLocked() error {
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequest)
+	return decodeJSONLimit(w, r, target, maxRequest)
+}
+
+func decodeJSONLimit(w http.ResponseWriter, r *http.Request, target any, limit int64) error {
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {

@@ -81,6 +81,55 @@ func TestDeepSeekReviewProducesFinalAnswerWithoutThinking(t *testing.T) {
 	}
 }
 
+func TestDeepSeekVisionRequestSwitchesModelAndPreservesImage(t *testing.T) {
+	previous := settings
+	settings = &configStore{value: aiConfig{BaseURL: "https://api.deepseek.com", APIKey: "synthetic", Model: "deepseek-v4-flash", Connected: true}}
+	t.Cleanup(func() { settings = previous })
+	mockAI(t, `{"choices":[{"message":{"content":"image understood"},"finish_reason":"stop"}]}`, func(body map[string]any) {
+		if body["model"] != "deepseek-v4-flash-vision-exp" {
+			t.Errorf("vision model was not selected: %v", body["model"])
+		}
+		messages := body["messages"].([]any)
+		content := messages[0].(map[string]any)["content"].([]any)
+		image := content[1].(map[string]any)["image_url"].(map[string]any)
+		if image["url"] != "data:image/webp;base64,AAAA" || image["detail"] != "original" {
+			t.Errorf("image content changed: %v", image)
+		}
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"messages":[{"role":"user","content":[{"type":"text","text":"Read the chart"},{"type":"image_url","image_url":{"url":"data:image/webp;base64,AAAA","detail":"original"}}]}]}`))
+	response := httptest.NewRecorder()
+	handleAIChat(response, request)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "image understood") {
+		t.Fatalf("vision request failed: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestImagesAreRejectedOutsideUserMessages(t *testing.T) {
+	request := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"messages":[{"role":"system","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,AAAA"}}]}]}`))
+	response := httptest.NewRecorder()
+	handleAIChat(response, request)
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "只有用户消息") {
+		t.Fatalf("unsafe image role was not rejected: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestVisionRequestDoesNotRewriteOtherProviderModel(t *testing.T) {
+	previous := settings
+	settings = &configStore{value: aiConfig{BaseURL: "https://example.test/v1", APIKey: "synthetic", Model: "provider-vision-model", Connected: true}}
+	t.Cleanup(func() { settings = previous })
+	mockAI(t, `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`, func(body map[string]any) {
+		if body["model"] != "provider-vision-model" {
+			t.Errorf("custom provider model was rewritten: %v", body["model"])
+		}
+	})
+	request := httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"messages":[{"role":"user","content":[{"type":"text","text":"Read"},{"type":"image_url","image_url":{"url":"https://example.test/chart.png"}}]}]}`))
+	response := httptest.NewRecorder()
+	handleAIChat(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("custom vision request failed: %d %s", response.Code, response.Body.String())
+	}
+}
+
 func TestReasoningOnlyIsNotReturnedAsFinalAnswer(t *testing.T) {
 	for _, finish := range []string{"length", "stop"} {
 		t.Run(finish, func(t *testing.T) {

@@ -986,7 +986,7 @@
   function applyAiPreset() {
     const preset = $("#aiProvider").value;
     const values = {
-      deepseek: { baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", help: "DeepSeek 官方 OpenAI 兼容地址；建议先使用 deepseek-v4-flash。" },
+      deepseek: { baseUrl: "https://api.deepseek.com", model: "deepseek-v4-flash", help: "普通文字使用 deepseek-v4-flash；写作带题图时自动切换官方视觉模型。" },
       openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini", help: "OpenAI 官方 API 地址；请填写 OpenAI 平台创建的 API Key。" },
       ollama: { baseUrl: "http://127.0.0.1:11434/v1", model: "", help: "本地模型服务必须已由使用者安装并启动；模型名填写本机已安装的名称。" }
     };
@@ -1194,9 +1194,20 @@
   }
 
 
-  async function askAi(messages, output, onSuccess, isCurrent = () => true) {
+  async function askAi(messages, output, onSuccess, isCurrent = () => true, images = []) {
     if (!aiConnected) return routeTo("settings");
     messages = [{role:"system", content:messages.filter(message => message.role === "system").map(message => message.content).join("\n\n")}, ...messages.filter(message => message.role !== "system")];
+    const safeImages = images.filter(src => typeof src === "string" && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(src));
+    if (safeImages.length) {
+      const userIndex = messages.findLastIndex(message => message.role === "user");
+      if (userIndex >= 0) messages[userIndex] = {
+        ...messages[userIndex],
+        content: [
+          { type: "text", text: messages[userIndex].content },
+          ...safeImages.map(src => ({ type: "image_url", image_url: { url: src, detail: "original" } }))
+        ]
+      };
+    }
     output.classList.remove("hidden");
     output.classList.remove("is-error", "markdown-body");
     output.textContent = "正在生成反馈……";
@@ -1234,7 +1245,7 @@
     const recordId = activeWritingId;
     const reviewInput = { prompt, original: essay, type: $("#writingType").value, promptImages: [...pendingWritingPromptImages] };
     const learnerContext = reviewLearnerContext("写作");
-    const imageNotice = pendingWritingPromptImages.length ? `\n题目另附 ${pendingWritingPromptImages.length} 张本地图片；当前通用文字接口无法读取图片，请仅依据下面的文字题目反馈，并明确图表细节无法核对。` : "";
+    const imageNotice = pendingWritingPromptImages.length ? `\n题目另附 ${pendingWritingPromptImages.length} 张图片。图片是题目的一部分，请先直接读取图片中的图表、流程、地图、数字、单位和标签，再结合文字题目核对正文；不要声称无法看到图片。` : "";
     askAi([
       { role: "system", content: `你是一名严谨、克制的 IELTS 写作教练。用户消息包含现有水平和目标水平。先按当前能力选择最易掌握、最有收益的修改与练习，再按目标水平生成可模仿的答案，并说明从当前到目标的关键差距。优先参考本模块的单项水平；只有总分时不要自行推定单项分数。现有水平只作学习背景，原稿评分仍独立依据实际文本证据，不得因为目标高就抬高原稿评分。目标未提供时明确说明，并给与原稿相近且略有提升的示范，不擅自设定固定目标分数。只依据用户提供的题目和原文；缺少关键信息时说明不确定性，不虚构官方成绩。\n\n纠错边界必须严格遵守：只有客观、明确、在当前语境下无合理争议的语法、拼写、词形、主谓一致、时态、冠词、单复数、介词或句法错误，才放入“确定语法错误”章节并使用原文｜修改｜类型｜原因四列表格，修改必须尽量小。措辞更自然、词汇更高级、表达更简洁、段落更流畅、论证更充分等都只是可选优化，不得标红原文，不得写入纠错表，必须放在独立的“可选优化建议”章节用普通项目符号说明。正确但不够漂亮的句子绝不能判错；证据不足时宁可不改。若没有确定错误，明确写“未发现需要标注的确定语法错误”，不要为了凑数量制造错误。语气具体、建设性，避免把整段正确内容全部判错。\n\n反馈固定按以下顺序：\n1. 题型与主题判断；\n2. 非官方预估总分及合理区间；\n3. 四项标准（Task 1 用 TA/CC/LR/GRA，Task 2 用 TR/CC/LR/GRA）及限制分数的证据；\n4. 任务完成、段落结构与论证/数据概括；\n5. 确定语法错误：只列客观错误的原文精确片段、最小修改、错误类型和简短原因；\n6. 可选优化建议：把语言提升、自然度、简洁度、衔接与论证建议单独列出，不标成错误；\n7. 只选 3–5 个最优先问题，并给短练习；\n8. 在保留原意的前提下给一版可模仿的目标水平英文修改稿，不堆砌生词；\n9. 按段给出准确自然的中文翻译；\n10. 只补充 2–3 条本题可直接复用的表达。\nTask 1 先核对比较对象、时间、单位和图表结构，再提取 2–3 个主特征，解释 Overview 和两个细节段为什么这样分组；如果没有图表信息，明确无法核对数据。Task 2 检查是否答全问题、立场是否直接、每段是否形成观点—解释—例子/结果。不要照搬私人模板或课程资料。` },
       { role: "user", content: `${learnerContext}\n\n写作类型：${$("#writingType").value}${imageNotice}\n题目：${prompt || "未提供文字题目"}\n\n我的正文：\n${essay}` }
@@ -1249,7 +1260,7 @@
       renderWritingHistory();
       refreshReviewWorkspace("writing", recordId);
       if (activeWritingId === recordId && location.hash === "#writing") openReviewWorkspace("writing", recordId);
-    }, () => activeWritingId === recordId);
+    }, () => activeWritingId === recordId, reviewInput.promptImages);
   }
 
   async function reviewSpeaking() {

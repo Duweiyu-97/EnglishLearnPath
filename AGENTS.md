@@ -31,3 +31,4 @@ When the user corrects an implementation or workflow, fix the current issue and 
 [CODE] Inline writing corrections are reserved for definite grammar, spelling, or mechanical errors; stylistic improvements must appear separately and must not mark the source as wrong.
 [UI] Keep action groups and media controls visibly separated from adjacent text areas, previews, and helper text at every responsive width.
 [WORKFLOW] Writing and speaking practice records autosave after meaningful edits and after transcription; do not require a separate save button before review or navigation.
+[ARCH] Writing prompt images must be sent to a vision-capable model as real image inputs; never silently reduce an image-based Task 1 review to text-only guessing.

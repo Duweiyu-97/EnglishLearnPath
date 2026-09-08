@@ -184,6 +184,16 @@ try {
   assert.match(h.chatRequests[0].messages[0].content, /只有客观、明确/);
   assert.match(h.chatRequests[0].messages[0].content, /可选优化建议/);
   assert.match(h.chatRequests[1].messages[0].content, /本地 Whisper/);
+  const vision = harness({ writings: [{ id: 'vision', type: 'Task 1 Academic', minutes: 20, prompt: 'Describe the chart.', promptImages: ['data:image/webp;base64,AAAA'], essay: 'The chart changes.', updatedAt: new Date().toISOString() }], speaking: [] });
+  await vision.api.loadWriting('vision');
+  vision.api.enableAi();
+  await vision.api.reviewWriting();
+  assert.equal(vision.chatRequests.length, 1);
+  assert.equal(Array.isArray(vision.chatRequests[0].messages[1].content), true, 'image review must use multimodal content blocks');
+  assert.equal(vision.chatRequests[0].messages[1].content[0].type, 'text');
+  assert.equal(vision.chatRequests[0].messages[1].content[1].type, 'image_url');
+  assert.equal(vision.chatRequests[0].messages[1].content[1].image_url.url, 'data:image/webp;base64,AAAA');
+  assert.match(vision.chatRequests[0].messages[1].content[0].text, /请先直接读取图片/);
   h.api.state.studyPlan = null;
   assert.match(h.api.reviewLearnerContext('写作'), /现有水平（用户自述）：未提供/);
   assert.match(h.api.reviewLearnerContext('写作'), /目标水平（用户设定）：未提供/);
