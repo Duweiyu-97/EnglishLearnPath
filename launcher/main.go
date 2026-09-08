@@ -69,9 +69,10 @@ type chatMessage struct {
 }
 
 type chatRequest struct {
-	Messages    []chatMessage `json:"messages"`
-	Temperature float64       `json:"temperature,omitempty"`
-	MaxTokens   int           `json:"max_tokens,omitempty"`
+	Messages       []chatMessage `json:"messages"`
+	Temperature    float64       `json:"temperature,omitempty"`
+	MaxTokens      int           `json:"max_tokens,omitempty"`
+	OutputContract string        `json:"output_contract,omitempty"`
 }
 
 type upstreamResponse struct {
@@ -353,7 +354,77 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
+	if err := validateOutputContract(content, input.OutputContract); err != nil {
+		writeError(w, http.StatusBadGateway, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"content": content, "model": cfg.Model})
+}
+
+func validateOutputContract(content, contract string) error {
+	if contract == "" || contract == "text" {
+		return nil
+	}
+	trimmed := strings.TrimSpace(content)
+	switch contract {
+	case "study-plan-json-v1", "personal-language-bank-json-v1":
+		trimmed = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "```json"), "```"))
+		trimmed = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "```"), "```"))
+		start, end := strings.Index(trimmed, "{"), strings.LastIndex(trimmed, "}")
+		if start < 0 || end <= start {
+			return errors.New("模型没有遵循网页所需的 JSON 输出格式，请重试或更换兼容模型")
+		}
+		var value map[string]any
+		if err := json.Unmarshal([]byte(trimmed[start:end+1]), &value); err != nil {
+			return errors.New("模型返回的 JSON 格式无效，请重试或更换兼容模型")
+		}
+		required := []string{"summary"}
+		if contract == "study-plan-json-v1" {
+			required = append(required, "priorities", "phases")
+		} else {
+			required = append(required, "speaking", "writing")
+		}
+		for _, key := range required {
+			if _, ok := value[key]; !ok {
+				return fmt.Errorf("模型返回的 JSON 缺少网页必需字段 %q，请重试或更换兼容模型", key)
+			}
+		}
+		if _, ok := value["summary"].(string); !ok {
+			return errors.New("模型返回的 JSON 字段 \"summary\" 必须是文字")
+		}
+		arrayKeys := []string{"speaking", "writing"}
+		if contract == "study-plan-json-v1" {
+			arrayKeys = []string{"priorities", "phases"}
+		}
+		for _, key := range arrayKeys {
+			if _, ok := value[key].([]any); !ok {
+				return fmt.Errorf("模型返回的 JSON 字段 %q 必须是数组", key)
+			}
+		}
+		return nil
+	case "review-markdown-v1-writing", "review-markdown-v1-speaking":
+		required := []string{"### 评分与小分", "### 总体评价", "### 确定语法错误", "### 原文优化建议", "### 目标水平范文", "### 最终值得记忆的语料"}
+		if contract == "review-markdown-v1-speaking" {
+			required = append(required[:2], append([]string{"### 转写整理稿"}, required[2:]...)...)
+		}
+		if !strings.HasPrefix(trimmed, "主题：") {
+			return errors.New("模型没有遵循网页报告格式，第一行必须是“主题：具体主题”")
+		}
+		position := -1
+		for _, heading := range required {
+			if strings.Count(content, heading) != 1 {
+				return fmt.Errorf("模型没有遵循网页报告格式，缺少 %q；请重试或更换兼容模型", strings.TrimPrefix(heading, "### "))
+			}
+			next := strings.Index(content, heading)
+			if next <= position {
+				return errors.New("模型没有按网页所需顺序返回报告章节，请重试或更换兼容模型")
+			}
+			position = next
+		}
+		return nil
+	default:
+		return errors.New("不支持的 AI 输出格式约束")
+	}
 }
 
 func validateChatContent(message chatMessage) (bool, error) {

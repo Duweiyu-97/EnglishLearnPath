@@ -33,3 +33,8 @@ When the user corrects an implementation or workflow, fix the current issue and 
 [WORKFLOW] Writing and speaking practice records autosave after meaningful edits and after transcription; do not require a separate save button before review or navigation.
 [ARCH] Writing prompt images must be sent to a vision-capable model as real image inputs; never silently reduce an image-based Task 1 review to text-only guessing.
 [WORKFLOW] Windows release packages must include a visible stop-service executable that can end leftover launcher processes before users delete or replace an extracted version.
+[CODE] Every AI feature must use a provider-neutral output contract and validate or normalize the response before inserting it into fixed web UI regions.
+[UI] Writing and speaking reports lead with the overall score and subscores, then overall feedback, annotated source, exact corrections, optional improvements, model answer, and reusable language.
+[UI] IELTS speaking practice must send the full question and explicit Part to AI; Part 2 runs a one-minute unrecorded preparation countdown followed by a two-minute recorded answer.
+[UI] Timed writing and speaking need a distraction-free mode with collapsible global navigation and simultaneous access to prompt, timer, and answer area.
+[ARCH] Personal language-bank generation is user-triggered, rebuilds from existing and newer saved practice text without audio or images, validates structured JSON, and persists the result locally.

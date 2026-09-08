@@ -4,17 +4,19 @@
   const DEFAULT_STATE = {
     writings: [],
     speaking: [],
+    languageBank: null,
     activityDates: [],
     studyPlan: null,
     planProgress: {},
     mistakes: [],
-    preferences: { aiProvider: "deepseek", aiBaseUrl: "https://api.deepseek.com", aiModel: "deepseek-v4-flash", speechLanguage: "en-GB" }
+    preferences: { aiProvider: "deepseek", aiBaseUrl: "https://api.deepseek.com", aiModel: "deepseek-v4-flash", speechLanguage: "en-GB", sidebarCollapsed: false }
   };
 
   const titles = {
     home: ["TODAY'S PATH", "学习概览"],
     writing: ["WRITING STUDIO", "写作工坊"],
     speaking: ["SPEAKING ROOM", "口语练习"],
+    language: ["YOUR REUSABLE LANGUAGE", "个人语料库"],
     plan: ["GOAL TO ACTION", "学习计划"],
     mistakes: ["REVIEW & IMPROVE", "错题与单词"],
     settings: ["PRIVATE BY DEFAULT", "AI 与数据设置"],
@@ -54,7 +56,17 @@
   let localTranscriptionController = null;
   let recordSeconds = 0;
   let recordInterval = null;
+  let speakingPhase = "idle";
+  let preparationSeconds = 0;
+  let preparationInterval = null;
   let toastTimer = null;
+
+  const SPEAKING_PARTS = {
+    p1: { label: "Part 1", title: "简短问答", guide: "直接回答问题，再补充一个理由或细节。单题通常回答 20–30 秒，不需要准备时间。", preparation: 0, answerLimit: 0 },
+    p2: { label: "Part 2", title: "个人陈述", guide: "先准备 1 分钟，再连续回答最多 2 分钟。准备阶段不会被录音，倒计时结束后自动开始。", preparation: 60, answerLimit: 120 },
+    p3: { label: "Part 3", title: "深入讨论", guide: "先直接表明观点，再说明原因，并用例子、对比或影响展开。通常每题回答 40–60 秒。", preparation: 0, answerLimit: 0 },
+    free: { label: "自由表达", title: "自由练习", guide: "按自己的节奏组织答案；录音结束后会自动转写并保存。", preparation: 0, answerLimit: 0 }
+  };
 
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -73,6 +85,7 @@
       ...candidate,
       writings: Array.isArray(candidate.writings) ? candidate.writings : [],
       speaking: Array.isArray(candidate.speaking) ? candidate.speaking : [],
+      languageBank: candidate.languageBank && typeof candidate.languageBank === "object" ? candidate.languageBank : null,
       activityDates: Array.isArray(candidate.activityDates) ? candidate.activityDates : [],
       studyPlan: candidate.studyPlan && typeof candidate.studyPlan === "object" ? candidate.studyPlan : null,
       planProgress: candidate.planProgress && typeof candidate.planProgress === "object" ? candidate.planProgress : {},
@@ -158,6 +171,37 @@
     toastTimer = setTimeout(() => toast.classList.remove("is-visible"), 2800);
   }
 
+  function setSidebarCollapsed(collapsed, persist = true) {
+    const shell = $(".app-shell");
+    shell.classList.toggle("is-sidebar-collapsed", Boolean(collapsed));
+    const button = $("#sidebarCollapse");
+    button.setAttribute?.("aria-label", collapsed ? "展开导航栏" : "收起导航栏");
+    button.title = collapsed ? "展开导航栏" : "收起导航栏";
+    if (persist) {
+      state.preferences.sidebarCollapsed = Boolean(collapsed);
+      if (diskReady) saveState();
+    }
+  }
+
+  function setPracticeFocus(enabled) {
+    document.body?.classList.toggle("practice-focus", Boolean(enabled));
+    $("#exitFocusMode").classList.toggle("hidden", !enabled);
+  }
+
+  function speakingPartConfig() {
+    return SPEAKING_PARTS[$("#speakingPart").value] || SPEAKING_PARTS.free;
+  }
+
+  function updateSpeakingPartGuide() {
+    const config = speakingPartConfig();
+    $("#speakingPartGuide").innerHTML = `<strong>${config.label} · ${config.title}</strong>${config.guide}`;
+    if (speakingPhase !== "idle") return;
+    $("#recordButton").textContent = config.preparation ? "开始 1 分钟准备" : "开始录音并转写";
+    $("#recordHint").textContent = config.preparation
+      ? "点击后先授权麦克风并开始准备倒计时；准备内容不会被录音。"
+      : "首次使用需允许麦克风；录音结束后由本地 Whisper 自动生成文字稿。";
+  }
+
   function routeTo(route) {
     const match = /^review\/(writing|speaking)\/([^/]+)$/.exec(route);
     let target = titles[route] ? route : "home";
@@ -173,6 +217,7 @@
     }
     if (target === "review" && !reviewWorkspaceSelection) target = "writing";
     if (target !== "review") releaseReviewAudio();
+    if (!['writing', 'speaking'].includes(target)) setPracticeFocus(false);
     $$("[data-page]").forEach(page => page.classList.toggle("is-active", page.dataset.page === target));
     $$(".nav-item[data-route]").forEach(item => item.classList.toggle("is-active", item.dataset.route === target));
     $("#pageEyebrow").textContent = titles[target][0];
@@ -385,7 +430,7 @@
     const cleaned = String(content || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
-    if (start < 0 || end <= start) throw new Error("AI 没有返回可读取的计划 JSON");
+    if (start < 0 || end <= start) throw new Error("AI 没有返回可读取的 JSON");
     return JSON.parse(cleaned.slice(start, end + 1));
   }
 
@@ -410,7 +455,8 @@
             { role: "user", content: `今天：${today()}\n预计考试日期：${profile.examDate}\n计划总天数：${totalDays}\n现有水平：${profile.currentLevel}\n目标水平：${profile.targetLevel}\n每日时间：${profile.dailyMinutes} 分钟\n重点与限制：${profile.focus || "未补充"}\n固定阶段窗口：${JSON.stringify(blueprints)}\n请为每个阶段安排不同的训练重点和周一至周日执行节奏。` }
           ],
           temperature: 0.2,
-          max_tokens: 3500
+          max_tokens: 3500,
+          output_contract: "study-plan-json-v1"
         })
       });
       const data = await response.json().catch(() => ({}));
@@ -946,6 +992,7 @@
       return;
     }
     if (!countUp && timerSeconds <= 0) resetWritingTimer();
+    setPracticeFocus(true);
     $("#toggleTimer").textContent = "暂停计时";
     timerInterval = setInterval(() => {
       timerSeconds += countUp ? 1 : -1;
@@ -1010,6 +1057,7 @@
     $("#aiBaseUrl").value = preferences.aiBaseUrl || "";
     $("#aiModel").value = preferences.aiModel || "";
     $("#speechLanguage").value = preferences.speechLanguage || "en-GB";
+    setSidebarCollapsed(Boolean(preferences.sidebarCollapsed), false);
   }
 
   function persistAiPreferences() {
@@ -1148,7 +1196,12 @@
       countElement: $("#reviewAnnotationCount"), noticeElement: $("#reviewAnnotationNotice")
     });
     if (!writing && !punctuated) $("#reviewAnnotationNotice").textContent = "生成整理稿后，修改标注将显示在这里。原始转写和下方修改建议保持不变。";
-    if (window.renderReviewReport) window.renderReviewReport($("#reviewWorkspaceFeedback"), feedback, $("#reviewWorkspaceNavigation"), { dedupeCorrections: annotations?.count > 0, hideTranscript: !writing });
+    if (window.renderReviewReport) window.renderReviewReport($("#reviewWorkspaceFeedback"), feedback, $("#reviewWorkspaceNavigation"), {
+      dedupeCorrections: annotations?.count > 0,
+      hideTranscript: !writing,
+      scoreElement: $("#reviewScoreSummary"),
+      overviewElement: $("#reviewOverviewSummary")
+    });
     else renderAiFeedback($("#reviewWorkspaceFeedback"), feedback);
   }
 
@@ -1194,7 +1247,12 @@
   }
 
 
-  async function askAi(messages, output, onSuccess, isCurrent = () => true, images = []) {
+  function reviewFormatContract(kind) {
+    const speaking = kind === "speaking";
+    return `你返回的内容会被不同服务商的 OpenAI 兼容 API 直接填入固定网页组件。必须只输出 Markdown，不要寒暄、前言、HTML、代码块或额外章节。第一行固定为“主题：8–20 个汉字的具体主题短标题”。之后只允许按以下顺序各出现一次三级标题：\n### 评分与小分\n### 总体评价\n${speaking ? "### 转写整理稿\n" : ""}### 确定语法错误\n### 原文优化建议\n### 目标水平范文\n### 最终值得记忆的语料\n“评分与小分”必须在第一行给出醒目的非官方总分或暂定总分，再用 Markdown 表格列出各项小分与证据。${speaking ? "口语总分必须给出一个基于转写的暂定分和合理区间，FC、LR、GRA 给出分数；P 写‘不可仅凭转写判断’，并明确总分会受真实发音影响。‘转写整理稿’只能补标点、大小写和分段，不得增删替换词。" : "写作按题型给出 TR/TA、CC、LR、GRA 四项分数。"}“确定语法错误”只能使用四列表格，表头严格为“原文｜修改｜类型｜原因”；原文逐字引用、修改尽量小，没有确定错误就写明没有，不得制造错误。“原文优化建议”只放正确但可提升的内容，不得使用纠错表。“目标水平范文”包含英文范文和必要的中文说明或翻译。“最终值得记忆的语料”只保留最值得主动记忆的表达。所有评价必须针对用户提供的完整题目、题型和回答。`;
+  }
+
+  async function askAi(messages, output, onSuccess, isCurrent = () => true, images = [], reportKind = "") {
     if (!aiConnected) return routeTo("settings");
     messages = [{role:"system", content:messages.filter(message => message.role === "system").map(message => message.content).join("\n\n")}, ...messages.filter(message => message.role !== "system")];
     const safeImages = images.filter(src => typeof src === "string" && /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(src));
@@ -1215,7 +1273,12 @@
       const response = await fetch("/api/ai/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: messages.map(message => message.role === "system" ? { ...message, content: message.content + "\n输出使用 Markdown：首先单独一行写‘主题：具体主题短标题’（8–20 个汉字，概括本题内容，不要只写 Task 2 或泛称教育类）；随后各反馈部分使用三级标题。只有确定错误章节可以使用 Markdown 四列表格，列名固定为“原文｜修改｜类型｜原因”，原文单元格逐字引用待修改片段，不添加省略号，方便页面精确标注。可选优化建议必须放在独立章节，使用普通项目符号，不得复用该四列表格，也不得把优化标成原文错误。示范答案与翻译分开成节。不使用 HTML，不把整份报告包在代码块中。" } : message), temperature: 0.25, max_tokens: 6000 })
+        body: JSON.stringify({
+          messages: messages.map(message => message.role === "system" && reportKind ? { ...message, content: message.content + "\n\n" + reviewFormatContract(reportKind) } : message),
+          temperature: 0.25,
+          max_tokens: 6000,
+          output_contract: reportKind ? `review-markdown-v1-${reportKind}` : "text"
+        })
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "请求失败");
@@ -1247,7 +1310,7 @@
     const learnerContext = reviewLearnerContext("写作");
     const imageNotice = pendingWritingPromptImages.length ? `\n题目另附 ${pendingWritingPromptImages.length} 张图片。图片是题目的一部分，请先直接读取图片中的图表、流程、地图、数字、单位和标签，再结合文字题目核对正文；不要声称无法看到图片。` : "";
     askAi([
-      { role: "system", content: `你是一名严谨、克制的 IELTS 写作教练。用户消息包含现有水平和目标水平。先按当前能力选择最易掌握、最有收益的修改与练习，再按目标水平生成可模仿的答案，并说明从当前到目标的关键差距。优先参考本模块的单项水平；只有总分时不要自行推定单项分数。现有水平只作学习背景，原稿评分仍独立依据实际文本证据，不得因为目标高就抬高原稿评分。目标未提供时明确说明，并给与原稿相近且略有提升的示范，不擅自设定固定目标分数。只依据用户提供的题目和原文；缺少关键信息时说明不确定性，不虚构官方成绩。\n\n纠错边界必须严格遵守：只有客观、明确、在当前语境下无合理争议的语法、拼写、词形、主谓一致、时态、冠词、单复数、介词或句法错误，才放入“确定语法错误”章节并使用原文｜修改｜类型｜原因四列表格，修改必须尽量小。措辞更自然、词汇更高级、表达更简洁、段落更流畅、论证更充分等都只是可选优化，不得标红原文，不得写入纠错表，必须放在独立的“可选优化建议”章节用普通项目符号说明。正确但不够漂亮的句子绝不能判错；证据不足时宁可不改。若没有确定错误，明确写“未发现需要标注的确定语法错误”，不要为了凑数量制造错误。语气具体、建设性，避免把整段正确内容全部判错。\n\n反馈固定按以下顺序：\n1. 题型与主题判断；\n2. 非官方预估总分及合理区间；\n3. 四项标准（Task 1 用 TA/CC/LR/GRA，Task 2 用 TR/CC/LR/GRA）及限制分数的证据；\n4. 任务完成、段落结构与论证/数据概括；\n5. 确定语法错误：只列客观错误的原文精确片段、最小修改、错误类型和简短原因；\n6. 可选优化建议：把语言提升、自然度、简洁度、衔接与论证建议单独列出，不标成错误；\n7. 只选 3–5 个最优先问题，并给短练习；\n8. 在保留原意的前提下给一版可模仿的目标水平英文修改稿，不堆砌生词；\n9. 按段给出准确自然的中文翻译；\n10. 只补充 2–3 条本题可直接复用的表达。\nTask 1 先核对比较对象、时间、单位和图表结构，再提取 2–3 个主特征，解释 Overview 和两个细节段为什么这样分组；如果没有图表信息，明确无法核对数据。Task 2 检查是否答全问题、立场是否直接、每段是否形成观点—解释—例子/结果。不要照搬私人模板或课程资料。` },
+      { role: "system", content: `你是一名严谨、克制的 IELTS 写作教练。用户消息包含现有水平和目标水平。先按当前能力选择最易掌握、最有收益的修改，再按目标水平生成可模仿的答案。优先参考本模块单项水平；只有总分时不要自行推定单项分数。现有水平只是学习背景，原稿评分必须独立依据实际文本，不得因目标分抬分。缺少关键信息时说明不确定性，不虚构官方成绩。评分与小分放在最前面，随后给简明总体评价。\n\n纠错边界必须严格遵守：只有客观、明确、在当前语境下无合理争议的语法、拼写、词形、主谓一致、时态、冠词、单复数、介词或句法错误，才放入“确定语法错误”，并使用原文｜修改｜类型｜原因四列表格；修改必须尽量小。措辞更自然、词汇更高级、表达更简洁、段落更流畅、论证更充分等都只是可选优化，只能放在“原文优化建议（可选优化建议）”，不得标红原文或写入纠错表。正确但不够漂亮的句子绝不能判错；证据不足时宁可不改；没有确定错误就明确写没有。范文保留原意并贴近目标水平，不堆砌生词；最后只保留真正值得主动记忆的领域搭配和常用句式。\n\nTask 1 先核对比较对象、时间、单位和图表结构，再提取 2–3 个主特征，解释 Overview 和细节段的分组；如果没有足够图表信息，明确无法核对数据。Task 2 检查是否答全问题、立场是否直接、每段是否形成观点—解释—例子或结果。不要照搬私人模板或课程资料。` },
       { role: "user", content: `${learnerContext}\n\n写作类型：${$("#writingType").value}${imageNotice}\n题目：${prompt || "未提供文字题目"}\n\n我的正文：\n${essay}` }
     ], $("#writingReview"), content => {
       const record = state.writings.find(entry => entry.id === recordId);
@@ -1260,7 +1323,7 @@
       renderWritingHistory();
       refreshReviewWorkspace("writing", recordId);
       if (activeWritingId === recordId && location.hash === "#writing") openReviewWorkspace("writing", recordId);
-    }, () => activeWritingId === recordId, reviewInput.promptImages);
+    }, () => activeWritingId === recordId, reviewInput.promptImages, "writing");
   }
 
   async function reviewSpeaking() {
@@ -1270,12 +1333,13 @@
     if (!await saveSpeaking({ silent: true })) return;
     const recordId = activeSpeakingId;
     const part = $("#speakingPart").value;
-    const reviewInput = { prompt, original: transcript, type: part };
+    const partConfig = SPEAKING_PARTS[part] || SPEAKING_PARTS.free;
+    const reviewInput = { prompt, original: transcript, type: partConfig.label };
     const learnerContext = reviewLearnerContext("口语");
     askAi([
-      { role: "system", content: `你是一名谨慎的 IELTS 口语教练。用户消息包含现有水平和目标水平。先按当前能力选择最易掌握、最有收益的修改与练习，再按目标水平生成可模仿的答案，并说明从当前到目标的关键差距。优先参考本模块的单项水平；只有总分时不要自行推定单项分数。现有水平只作学习背景，原稿评分仍独立依据实际文本证据，不得因为目标高就抬高原稿评分。目标未提供时明确说明，并给与原稿相近且略有提升的示范，不擅自设定固定目标分数。你只收到本地 Whisper 生成的 ASR 转写文本，没有可供模型直接分析的音频，因此绝对不能评价具体发音、重音、语调或真实停顿；Pronunciation 必须标为“无法仅凭文字判断”。输入不是用户逐字键入的作文。标点缺失、句首或专名大小写缺失、识别分段不准确都可能来自 ASR，不得据此扣分，也不要列为用户口语语法错误。先在内部结合上下文作保守的语义分句，再评价表达并生成优化答案与错误修正；不要修改或覆盖页面上的原始转写。句界或词语存在歧义时标为“转写待核对”，说明判断限制，不要凭空补词、猜测发音或把可能的识别错误断言为用户错误。错误修正只针对有充分文本依据的用词、搭配、语法和内容组织问题；保留原观点和口语风格。\n反馈固定顺序：1. 一句话总体表现与低置信度的非官方文字表现区间；2. FC（只评价答案展开与文本连贯线索）、LR、GRA，P 标记不可评；3. 最多 3 个优先改进项；4. 逐句列出原片段、最小修改和中文原因；5. 保留用户原观点、经历、理由与口语风格，给一版对齐用户目标、可真实复述且衔接当前能力的版本；6. 4–8 条本题可复用表达；7. 2–4 个 3–10 分钟专项练习并建议重说同题。不要编造新人物、经历、数据或观点，不要把答案改成书面论文。Part 1 目标约 3–5 个自然句、40–65 词；Part 2 覆盖题卡并形成清晰故事线；Part 3 使用直接回答—原因—例子/对比—影响/小结，通常 70–100 词。` },
+      { role: "system", content: `你是一名谨慎的 IELTS 口语教练。用户消息包含现有水平、目标水平、明确的口语 Part、完整题目和本地 Whisper 转写。必须同时依据题目、Part 规则和回答批改，不得只看文字稿。先按当前能力选择最易掌握、最有收益的修改，再按目标水平生成可真实复述的答案。原稿评分独立依据文本证据，不得因目标分抬分。你没有音频，因此不能评价具体发音、重音、语调或真实停顿；Pronunciation 标为不可仅凭转写判断。仍须给一个醒目的“基于转写的暂定总分”和合理区间，FC、LR、GRA 给直接小分，并说明真实总分会受发音影响。标点、大小写和分段问题可能来自 ASR，不得据此扣分或判为口语错误。句界或词语存在歧义时标记“转写待核对”，不得猜测。确定语法错误只收录有充分文本依据的问题，正确但不够自然的表达只能进入优化建议。不要修改或覆盖页面上的原始转写。保留用户的观点、经历、理由和口语风格，不编造人物、经历、数据或观点，不改成书面论文。\n\nPart 1：针对当前具体问题，检查是否直接回答并用 1–2 个自然细节展开，避免背诵式长篇。Part 2：把用户输入视为完整题卡，逐项核对覆盖度、1–2 分钟独白的故事线、时序与细节；不能只按普通问答评。Part 3：检查是否形成直接回答—原因—例子或对比—影响/小结的深入讨论，不要求机械套模板。自由表达：按用户给出的目的和内容评价。` },
       { role: "system", content: "页面展示要求：不要寒暄。增加独立三级标题‘转写整理稿’，其正文只放补充基础标点、大小写和分段后的转写，不得增删替换原始转写中的词语，不得修复语法或猜测识别错误。逐句修改仍单独列出，原片段逐字引用用户的原始转写，页面会将修改定位到整理稿。不要在其他章节重复整理稿。" },
-      { role: "user", content: `${learnerContext}\n\n题型：${part}\n话题：${prompt || "自由表达"}\n\n本地 Whisper 转写文字稿：\n${transcript}` }
+      { role: "user", content: `${learnerContext}\n\nIELTS 口语题型：${partConfig.label}（${partConfig.title}）\n该 Part 的答题要求：${partConfig.guide}\n完整题目 / 题卡：\n${prompt || "未提供具体题目，仅作自由表达"}\n\n本地 Whisper 转写文字稿：\n${transcript}` }
     ], $("#speakingReview"), content => {
       const record = state.speaking.find(entry => entry.id === recordId);
       if (!record) return;
@@ -1293,7 +1357,7 @@
       }
       refreshReviewWorkspace("speaking", recordId);
       if (activeSpeakingId === recordId && location.hash === "#speaking") openReviewWorkspace("speaking", recordId);
-    }, () => activeSpeakingId === recordId);
+    }, () => activeSpeakingId === recordId, [], "speaking");
   }
 
   async function refreshTranscriptionStatus() {
@@ -1331,7 +1395,59 @@
     if (session === recordingSession && recordingBlob) await saveSpeaking({ silent: true });
   }
 
+  function beginSpeakingRecording(session) {
+    if (session !== recordingSession || !recordingStream) return;
+    clearInterval(preparationInterval);
+    preparationInterval = null;
+    speakingPhase = "recording";
+    $("#speakingPart").disabled = true;
+    recorder = new MediaRecorder(recordingStream);
+    recordingChunks = [];
+    recorder.ondataavailable = event => { if (event.data.size) recordingChunks.push(event.data); };
+    recorder.onstop = finishRecording;
+    recorder.start();
+    recordSeconds = 0;
+    $("#recordPulse span").textContent = "00:00";
+    $("#speakingSaveStatus").textContent = "正在录音，结束转写后自动保存…";
+    $("#recordPulse").classList.remove("is-preparing");
+    $("#recordPulse").classList.add("is-recording");
+    $("#recordButton").textContent = "结束录音与转写";
+    const config = speakingPartConfig();
+    $("#recordHint").textContent = config.answerLimit
+      ? `${config.label} 回答已开始；到 ${formatClock(config.answerLimit)} 时自动结束，也可以提前结束。`
+      : "正在录音；结束后由 Whisper 在本机一次性转写，不会上传音频。";
+    setPracticeFocus(true);
+    clearInterval(recordInterval);
+    recordInterval = setInterval(() => {
+      recordSeconds += 1;
+      $("#recordPulse span").textContent = formatClock(recordSeconds);
+      const limit = config.answerLimit || 480;
+      if (recordSeconds >= limit && recorder?.state === "recording") recorder.stop();
+    }, 1000);
+  }
+
+  function beginSpeakingPreparation(session) {
+    speakingPhase = "preparing";
+    $("#speakingPart").disabled = true;
+    preparationSeconds = speakingPartConfig().preparation;
+    $("#recordPulse span").textContent = formatClock(preparationSeconds);
+    $("#recordPulse").classList.add("is-preparing");
+    $("#recordButton").textContent = "立即开始 2 分钟回答";
+    $("#recordHint").textContent = "准备中：整理关键词和顺序，不会录音；倒计时结束后自动开始回答。";
+    setPracticeFocus(true);
+    clearInterval(preparationInterval);
+    preparationInterval = setInterval(() => {
+      preparationSeconds -= 1;
+      $("#recordPulse span").textContent = formatClock(preparationSeconds);
+      if (preparationSeconds <= 0) beginSpeakingRecording(session);
+    }, 1000);
+  }
+
   async function toggleRecording() {
+    if (speakingPhase === "preparing") {
+      beginSpeakingRecording(recordingSession);
+      return;
+    }
     if (recordingBusy) return;
     if (recorder?.state === "recording") {
       recorder.stop();
@@ -1356,23 +1472,8 @@
       playback.load();
       playback.classList.add("hidden");
       $("#downloadRecording").classList.add("hidden");
-      recorder = new MediaRecorder(recordingStream);
-      recordingChunks = [];
-      recorder.ondataavailable = event => { if (event.data.size) recordingChunks.push(event.data); };
-      recorder.onstop = finishRecording;
-      recorder.start();
-      recordSeconds = 0;
-      $("#recordPulse span").textContent = "00:00";
-      $("#speakingSaveStatus").textContent = "正在录音，结束转写后自动保存…";
-      $("#recordPulse").classList.add("is-recording");
-      $("#recordButton").textContent = "结束录音与转写";
-      $("#recordHint").textContent = "正在录音；结束后由 Whisper 在本机一次性转写，不会上传音频。";
-      clearInterval(recordInterval);
-      recordInterval = setInterval(() => {
-        recordSeconds += 1;
-        $("#recordPulse span").textContent = formatClock(recordSeconds);
-        if (recordSeconds >= 480 && recorder?.state === "recording") recorder.stop();
-      }, 1000);
+      if (speakingPartConfig().preparation) beginSpeakingPreparation(session);
+      else beginSpeakingRecording(session);
     } catch (error) {
       recordingStream?.getTracks().forEach(track => track.stop());
       recordingStream = null;
@@ -1385,6 +1486,7 @@
   async function finishRecording() {
     const session = recordingSession;
     recordingBusy = true;
+    speakingPhase = "transcribing";
     clearInterval(recordInterval);
     recordingStream?.getTracks().forEach(track => track.stop());
     recordingBlob = new Blob(recordingChunks, { type: recorder.mimeType || "audio/webm" });
@@ -1398,6 +1500,11 @@
     $("#recordHint").textContent = "录音已结束，正在启动本地 Whisper 转写……";
     if (session !== recordingSession) return;
     await transcribeLocalRecording(session);
+    if (session === recordingSession) {
+      speakingPhase = "idle";
+      $("#speakingPart").disabled = false;
+      updateSpeakingPartGuide();
+    }
   }
 
   function renderSpeakingHistory() {
@@ -1423,9 +1530,14 @@
     $("#cancelLocalTranscription").classList.add("hidden");
     $("#retryLocalTranscription").disabled = !localTranscriptionReady;
     $("#speakingTranscript").disabled = false;
+    $("#speakingPart").disabled = false;
     recordingSession += 1;
     recordingBusy = false;
     clearInterval(recordInterval);
+    clearInterval(preparationInterval);
+    preparationInterval = null;
+    preparationSeconds = 0;
+    speakingPhase = "idle";
     if (recorder?.state === "recording") {
       recorder.onstop = null;
       try { recorder.stop(); } catch { /* recorder already stopped */ }
@@ -1445,8 +1557,8 @@
     $("#downloadRecording").classList.add("hidden");
     $("#recordButton").disabled = !localTranscriptionReady;
     $("#recordPulse").classList.remove("is-recording");
-    $("#recordButton").textContent = "开始录音并转写";
-    $("#recordHint").textContent = "首次使用需允许麦克风；本地 Whisper 会在录音结束后自动生成文字稿";
+    $("#recordPulse").classList.remove("is-preparing");
+    updateSpeakingPartGuide();
   }
 
   async function newSpeaking(skipAutosave = false) {
@@ -1457,6 +1569,7 @@
     $("#speakingPrompt").value = "";
     $("#speakingTranscript").value = "";
     $("#speakingPart").value = "p1";
+    updateSpeakingPartGuide();
     $("#speakingReview").textContent = "";
     $("#speakingReview").classList.add("hidden");
     $("#deleteSpeaking").classList.add("hidden");
@@ -1475,6 +1588,7 @@
     $("#speakingPrompt").value = item.prompt || "";
     $("#speakingTranscript").value = item.transcript || "";
     $("#speakingPart").value = item.part || "p1";
+    updateSpeakingPartGuide();
     if (typeof item.audio === "string" && /^data:audio\/[\w.+-]+(?:;codecs=[\w.-]+)?;base64,/.test(item.audio)) {
       const [header, encoded] = item.audio.split(",");
       try {
@@ -1641,6 +1755,108 @@
     }
   }
 
+  const languageText = (value, limit = 600) => String(value || "").trim().slice(0, limit);
+  const languageList = (value, limit = 8) => Array.isArray(value) ? value.map(item => languageText(item, 360)).filter(Boolean).slice(0, limit) : [];
+
+  function normalizeLanguageBank(value) {
+    const source = value && typeof value === "object" ? value : {};
+    return {
+      summary: languageText(source.summary, 1000),
+      speaking: (Array.isArray(source.speaking) ? source.speaking : []).slice(0, 30).map(item => ({
+        title: languageText(item?.title, 100),
+        personalCore: languageText(item?.personalCore, 800),
+        reusableTopics: languageList(item?.reusableTopics, 10),
+        expressions: languageList(item?.expressions, 12),
+        answerFrames: languageList(item?.answerFrames, 6)
+      })).filter(item => item.title && (item.personalCore || item.expressions.length)),
+      writing: (Array.isArray(source.writing) ? source.writing : []).slice(0, 24).map(item => ({
+        domain: languageText(item?.domain, 100),
+        collocations: languageList(item?.collocations, 14),
+        sentencePatterns: languageList(item?.sentencePatterns, 8)
+      })).filter(item => item.domain && (item.collocations.length || item.sentencePatterns.length))
+    };
+  }
+
+  function languageBankSource() {
+    const newest = items => [...items].sort((a, b) => String(b.reviewedAt || b.updatedAt || "").localeCompare(String(a.reviewedAt || a.updatedAt || "")));
+    const speaking = newest(state.speaking).slice(0, 40).map(item => ({
+      part: SPEAKING_PARTS[item.part]?.label || item.part || "自由表达",
+      question: languageText(item.prompt, 1200),
+      answer: languageText(item.reviewInput?.original || item.transcript, 3000),
+      feedback: languageText(item.review, 1800)
+    })).filter(item => item.question || item.answer);
+    const writing = newest(state.writings).slice(0, 30).map(item => ({
+      type: languageText(item.type, 50),
+      question: languageText(item.prompt, 1200),
+      answer: languageText(item.reviewInput?.original || item.essay, 3500),
+      feedback: languageText(item.review, 1800)
+    })).filter(item => item.question || item.answer);
+    // Keep the newest useful records while staying comfortably below the
+    // launcher's request-size limit, even when both practice libraries are full.
+    const serializedLength = () => JSON.stringify({ speaking, writing }).length;
+    while (serializedLength() > 85000 && (speaking.length || writing.length)) {
+      if (!writing.length || speaking.length >= writing.length) speaking.pop();
+      else writing.pop();
+    }
+    return { speaking, writing };
+  }
+
+  function renderLanguageList(root, items, kind) {
+    if (!items.length) {
+      root.className = "language-bank-list empty-state";
+      root.textContent = kind === "speaking" ? "尚无个人口语素材" : "尚无写作语料";
+      return;
+    }
+    root.className = "language-bank-list";
+    root.innerHTML = items.map(item => kind === "speaking"
+      ? `<article class="language-card"><h4>${escapeHtml(item.title)}</h4><p>${escapeHtml(item.personalCore)}</p><div><strong>可迁移话题</strong><div class="language-tags">${item.reusableTopics.map(text => `<span>${escapeHtml(text)}</span>`).join("")}</div></div><div><strong>可复用表达</strong><ul>${item.expressions.map(text => `<li>${escapeHtml(text)}</li>`).join("")}</ul></div><div><strong>答题骨架</strong><ul>${item.answerFrames.map(text => `<li>${escapeHtml(text)}</li>`).join("")}</ul></div></article>`
+      : `<article class="language-card"><h4>${escapeHtml(item.domain)}</h4><div><strong>词组与搭配</strong><ul>${item.collocations.map(text => `<li>${escapeHtml(text)}</li>`).join("")}</ul></div><div><strong>常用句式</strong><ul>${item.sentencePatterns.map(text => `<li>${escapeHtml(text)}</li>`).join("")}</ul></div></article>`).join("");
+  }
+
+  function renderLanguageBank() {
+    const bank = state.languageBank ? normalizeLanguageBank(state.languageBank) : null;
+    const status = $("#languageBankStatus");
+    if (!bank) {
+      status.innerHTML = "<div><strong>尚未生成</strong><span>完成一些口语或写作练习后，可按需汇总；系统不会每次练习都自动调用 AI。</span></div>";
+      renderLanguageList($("#speakingLanguageBank"), [], "speaking");
+      renderLanguageList($("#writingLanguageBank"), [], "writing");
+      return;
+    }
+    const meta = state.languageBank;
+    status.innerHTML = `<div><strong>${escapeHtml(bank.summary || "个人语料库已生成")}</strong><span>更新于 ${escapeHtml(new Date(meta.generatedAt).toLocaleString())} · 汇总 ${Number(meta.sourceCounts?.speaking || 0)} 条口语、${Number(meta.sourceCounts?.writing || 0)} 篇写作</span></div>`;
+    renderLanguageList($("#speakingLanguageBank"), bank.speaking, "speaking");
+    renderLanguageList($("#writingLanguageBank"), bank.writing, "writing");
+  }
+
+  async function generateLanguageBank() {
+    if (!aiConnected) return routeTo("settings");
+    const source = languageBankSource();
+    if (!source.speaking.length && !source.writing.length) return showToast("先完成并保存至少一次口语或写作练习");
+    const button = $("#generateLanguageBank");
+    button.disabled = true;
+    $("#languageBankStatus").innerHTML = "<div><strong>正在汇总现有与新增记录…</strong><span>只发送题目、回答和已有批改文字，不发送录音或题目图片。</span></div>";
+    try {
+      const response = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({
+        messages: [
+          { role: "system", content: "你是个人英语语料整理助手。只依据用户真实答题记录归纳，不补造经历、观点、身份或事实。口语优先把同一个人的经历、偏好、人物、地点、物品和观点整理成可跨陌生题目迁移的素材，同时保留自然、可说出口的英文表达和灵活答题骨架；不要生成死板整段背诵答案。写作只按领域汇总可靠的词组、搭配和通用句式。只返回一个 JSON 对象，禁止 Markdown、代码块和额外文字。结构严格为 {summary:string,speaking:[{title:string,personalCore:string,reusableTopics:string[],expressions:string[],answerFrames:string[]}],writing:[{domain:string,collocations:string[],sentencePatterns:string[]}]}。所有键必须存在，数组无内容时返回空数组。去重并优先保留高频、真实、容易复用的内容。" },
+          { role: "user", content: `${reviewLearnerContext("个人语料库")}\n\n以下 JSON 是本机已保存的现有和新增练习记录（不含录音与图片）：\n${JSON.stringify(source)}` }
+        ], temperature: 0.15, max_tokens: 6000, output_contract: "personal-language-bank-json-v1"
+      }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "请求失败");
+      const normalizedBank = normalizeLanguageBank(parseAiJson(data.content));
+      if (!normalizedBank.speaking.length && !normalizedBank.writing.length) throw new Error("AI 返回的 JSON 没有可用语料，请重试或更换模型");
+      state.languageBank = { ...normalizedBank, generatedAt: new Date().toISOString(), sourceCounts: { speaking: source.speaking.length, writing: source.writing.length } };
+      await saveState(true);
+      renderLanguageBank();
+      showToast("个人语料库已更新并保存到本地");
+    } catch (error) {
+      $("#languageBankStatus").innerHTML = `<div><strong>语料库生成失败</strong><span>${escapeHtml(error.message)}。原有语料库不会被覆盖。</span></div>`;
+    } finally {
+      button.disabled = !aiConnected;
+    }
+  }
+
   function renderAll() {
     renderMetrics();
     renderWritingHistory();
@@ -1648,9 +1864,14 @@
     renderStudyPlan();
     renderTodayPlan();
     renderMistakes();
+    renderLanguageBank();
   }
 
   function bindEvents() {
+    $("#sidebarCollapse").addEventListener("click", () => setSidebarCollapsed(!$(".app-shell").classList.contains("is-sidebar-collapsed")));
+    $("#writingFocusMode").addEventListener("click", () => setPracticeFocus(true));
+    $("#speakingFocusMode").addEventListener("click", () => setPracticeFocus(true));
+    $("#exitFocusMode").addEventListener("click", () => setPracticeFocus(false));
     $("#cancelLocalTranscription").addEventListener("click", () => localTranscriptionController?.abort());
     $("#retryLocalTranscription").addEventListener("click", () => {
       if (recordingBusy || recorder?.state === "recording") return;
@@ -1715,10 +1936,15 @@
     $("#newSpeaking").addEventListener("click", () => newSpeaking());
     $("#speakingPrompt").addEventListener("input", scheduleSpeakingAutosave);
     $("#speakingTranscript").addEventListener("input", scheduleSpeakingAutosave);
-    $("#speakingPart").addEventListener("change", scheduleSpeakingAutosave);
+    $("#speakingPart").addEventListener("change", () => {
+      if (speakingPhase !== "idle") return showToast("请先结束当前准备或录音，再切换题型");
+      updateSpeakingPartGuide();
+      scheduleSpeakingAutosave();
+    });
     $("#deleteSpeaking").addEventListener("click", () => deleteSpeakingRecord(activeSpeakingId));
     $("#reviewSpeaking").addEventListener("click", reviewSpeaking);
     $("#addSpeakingMistake").addEventListener("click", () => openMistakeComposer("speaking", `口语复盘 · ${$("#speakingPrompt").value.trim() || "自由表达"}`, `文字稿：${$("#speakingTranscript").value.trim() || "未填写"}\n\n回听与转写核对：\n确定问题：\n可复用表达：\n重说后的变化：`, activeSpeakingId ? { module: "speaking", id: activeSpeakingId } : null));
+    $("#generateLanguageBank").addEventListener("click", generateLanguageBank);
     $("#saveManualPlan").addEventListener("click", saveManualPlan);
     $("#generateAiPlan").addEventListener("click", generateAiPlan);
     $("#deletePlan").addEventListener("click", () => {

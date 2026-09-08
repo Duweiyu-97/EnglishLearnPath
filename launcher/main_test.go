@@ -180,4 +180,32 @@ func TestAppInfoUsesInjectedBuildVersion(t *testing.T) {
 	}
 }
 
+func TestProviderNeutralOutputContracts(t *testing.T) {
+	writing := "主题：城市交通\n\n### 评分与小分\n6.5\n\n### 总体评价\n清晰。\n\n### 确定语法错误\n没有。\n\n### 原文优化建议\n更具体。\n\n### 目标水平范文\nExample.\n\n### 最终值得记忆的语料\npublic transport"
+	if err := validateOutputContract(writing, "review-markdown-v1-writing"); err != nil {
+		t.Fatalf("valid writing contract rejected: %v", err)
+	}
+	if err := validateOutputContract(strings.Replace(writing, "### 评分与小分", "### 评分", 1), "review-markdown-v1-writing"); err == nil {
+		t.Fatal("review without the fixed score heading must be rejected")
+	}
+	wrongOrder := strings.Replace(writing, "### 评分与小分\n6.5\n\n### 总体评价\n清晰。", "### 总体评价\n清晰。\n\n### 评分与小分\n6.5", 1)
+	if err := validateOutputContract(wrongOrder, "review-markdown-v1-writing"); err == nil {
+		t.Fatal("review headings in the wrong order must be rejected")
+	}
+	bank := `{"summary":"updated","speaking":[],"writing":[]}`
+	if err := validateOutputContract(bank, "personal-language-bank-json-v1"); err != nil {
+		t.Fatalf("valid language bank rejected: %v", err)
+	}
+	if err := validateOutputContract(`{"summary":"missing arrays"}`, "personal-language-bank-json-v1"); err == nil {
+		t.Fatal("language bank without fixed arrays must be rejected")
+	}
+	if err := validateOutputContract(`{"summary":"wrong type","speaking":{},"writing":[]}`, "personal-language-bank-json-v1"); err == nil {
+		t.Fatal("language bank fields with the wrong type must be rejected")
+	}
+	plan := `{"summary":"plan","priorities":[],"phases":[]}`
+	if err := validateOutputContract(plan, "study-plan-json-v1"); err != nil {
+		t.Fatalf("valid plan rejected: %v", err)
+	}
+}
+
 var timeNow = func() time.Time { return time.Now() }

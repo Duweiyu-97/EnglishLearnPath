@@ -64,8 +64,12 @@ function harness(initialState, localWhisper) {
     setInterval(fn, ms) { const timer = setInterval(fn, ms); timers.add(timer); return timer; }, clearInterval,
     fetch: async (url, options) => {
       if (url === '/api/ai/chat') {
-        chatRequests.push(JSON.parse(options.body));
-        return { ok: true, json: async () => ({ content: 'Synthetic feedback' }) };
+        const request = JSON.parse(options.body);
+        chatRequests.push(request);
+        const content = request.output_contract === 'personal-language-bank-json-v1'
+          ? JSON.stringify({summary:'My bank',speaking:[{title:'Cycling',personalCore:'I enjoy cycling with friends.',reusableTopics:['hobbies'],expressions:['clear my mind'],answerFrames:['answer → reason → example']}],writing:[{domain:'education',collocations:['equal access'],sentencePatterns:['It is important to...']} ]})
+          : 'Synthetic feedback';
+        return { ok: true, json: async () => ({ content }) };
       }
       if (url === '/api/data' && options?.method === 'PUT') {
         if (failWrites) return { ok: false, json: async () => ({ error: 'test disk failure' }) };
@@ -75,9 +79,9 @@ function harness(initialState, localWhisper) {
     }
   });
   vm.runInContext(source.replace(/  initialize\(\);\s*\}\)\(\);\s*$/, `
-    globalThis.api = { refreshTranscriptionStatus, transcribeLocalRecording, bindEvents, toggleRecording, saveWriting, saveSpeaking, loadSpeaking, newSpeaking, loadWriting, todayPlanTasks, normalizePlanDay, normalizeAiPlanDay, reviewWriting, reviewSpeaking, reviewLearnerContext, reviewTopicTitle, practiceTitle,
+    globalThis.api = { refreshTranscriptionStatus, transcribeLocalRecording, bindEvents, toggleRecording, saveWriting, saveSpeaking, loadSpeaking, newSpeaking, loadWriting, todayPlanTasks, normalizePlanDay, normalizeAiPlanDay, reviewWriting, reviewSpeaking, reviewLearnerContext, reviewTopicTitle, practiceTitle, generateLanguageBank, normalizeLanguageBank, languageBankSource,
       enableAi() { aiConnected = true; },
-      get busy() { return recordingBusy; }, get blob() { return recordingBlob; },
+      get busy() { return recordingBusy; }, get blob() { return recordingBlob; }, get speakingPhase() { return speakingPhase; },
       get state() { return state; }, set state(value) { state = normalizeState(value); }
     };
   })();`), context);
@@ -112,6 +116,19 @@ try {
   completeTranscription('Late obsolete result');
   await pending;
   assert.equal(offline.element('#speakingTranscript').value, '', 'late transcription must not overwrite a new practice');
+
+  const part2 = harness();
+  await part2.api.refreshTranscriptionStatus();
+  part2.element('#speakingPart').value = 'p2';
+  part2.element('#speakingPart').events.change();
+  await part2.api.toggleRecording();
+  assert.equal(part2.api.speakingPhase, 'preparing', 'Part 2 must begin with an unrecorded preparation phase');
+  assert.equal(part2.element('#recordButton').textContent, '立即开始 2 分钟回答');
+  await part2.api.toggleRecording();
+  assert.equal(part2.api.speakingPhase, 'recording', 'Part 2 must enter the answer recording after preparation');
+  await part2.api.toggleRecording();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(part2.element('#speakingTranscript').value, 'Local Whisper result.');
 
   const h = harness();
   assert.equal(h.api.reviewTopicTitle('- **主题**: 儿童成长环境的选择，属于社会与教育类话题。'), '儿童成长环境的选择');
@@ -184,6 +201,9 @@ try {
   assert.match(h.chatRequests[0].messages[0].content, /只有客观、明确/);
   assert.match(h.chatRequests[0].messages[0].content, /可选优化建议/);
   assert.match(h.chatRequests[1].messages[0].content, /本地 Whisper/);
+  assert.match(h.chatRequests[1].messages[1].content, /完整题目 \/ 题卡/);
+  assert.match(h.chatRequests[1].messages[1].content, /Part 1/);
+  assert.equal(h.chatRequests[1].output_contract, 'review-markdown-v1-speaking');
   const vision = harness({ writings: [{ id: 'vision', type: 'Task 1 Academic', minutes: 20, prompt: 'Describe the chart.', promptImages: ['data:image/webp;base64,AAAA'], essay: 'The chart changes.', updatedAt: new Date().toISOString() }], speaking: [] });
   await vision.api.loadWriting('vision');
   vision.api.enableAi();
@@ -194,6 +214,19 @@ try {
   assert.equal(vision.chatRequests[0].messages[1].content[1].type, 'image_url');
   assert.equal(vision.chatRequests[0].messages[1].content[1].image_url.url, 'data:image/webp;base64,AAAA');
   assert.match(vision.chatRequests[0].messages[1].content[0].text, /请先直接读取图片/);
+  assert.equal(vision.chatRequests[0].output_contract, 'review-markdown-v1-writing');
+  await h.api.generateLanguageBank();
+  assert.equal(h.chatRequests.at(-1).output_contract, 'personal-language-bank-json-v1');
+  assert.equal(h.api.state.languageBank.speaking[0].title, 'Cycling');
+  assert.equal(h.api.state.languageBank.writing[0].domain, 'education');
+  const manyRecords = harness({
+    speaking: Array.from({length: 40}, (_, index) => ({id:`s${index}`, part:'p1', prompt:`Question ${index} ${'q'.repeat(1200)}`, transcript:`Answer ${index} ${'a'.repeat(3000)}`, review:'f'.repeat(1800), updatedAt:new Date(2026, 0, index + 1).toISOString()})),
+    writings: Array.from({length: 30}, (_, index) => ({id:`w${index}`, type:'Task 2', prompt:`Writing ${index} ${'q'.repeat(1200)}`, essay:`Essay ${index} ${'e'.repeat(3500)}`, review:'f'.repeat(1800), updatedAt:new Date(2026, 1, index + 1).toISOString()}))
+  });
+  const boundedSource = manyRecords.api.languageBankSource();
+  assert.ok(JSON.stringify(boundedSource).length <= 85000, 'manual language-bank input must stay below the launcher request limit');
+  assert.match(boundedSource.speaking[0]?.question || '', /Question 39/, 'the newest speaking records must be retained first');
+  assert.match(boundedSource.writing[0]?.question || '', /Writing 29/, 'the newest writing records must be retained first');
   h.api.state.studyPlan = null;
   assert.match(h.api.reviewLearnerContext('写作'), /现有水平（用户自述）：未提供/);
   assert.match(h.api.reviewLearnerContext('写作'), /目标水平（用户设定）：未提供/);

@@ -44,7 +44,6 @@ const server = http.createServer(async (req, res) => {
     await page.goto(`http://127.0.0.1:${server.address().port}/#speaking`);
     await page.locator('[data-speaking-id="s1"]').click();
     async function checkMarkdown(selector) {
-      assert.equal(await page.locator(`${selector} h3`).first().textContent(),'总体表现');
       assert.equal(await page.locator(`${selector} strong`).textContent(),'重点');
       assert.equal(await page.locator(`${selector} ul li`).count(),2);
       assert.equal(await page.locator(`${selector} .markdown-table-scroll table`).count(),1);
@@ -53,7 +52,7 @@ const server = http.createServer(async (req, res) => {
       assert.equal(await page.locator(`${selector} a[href="https://example.com"]`).getAttribute('rel'),'noopener noreferrer');
     }
     assert.match(page.url(), /#review\/speaking\/s1$/);
-    await checkMarkdown('#reviewWorkspaceFeedback');
+    await checkMarkdown('#reviewOverviewSummary');
     assert.equal(await page.locator('#reviewWorkspacePrompt').textContent(),'Do you enjoy cycling?');
     assert.equal(await page.locator('#reviewWorkspaceOriginal').textContent(),'I like cycling.');
     assert.equal(await page.locator('#reviewWorkspaceAudio').isVisible(),true);
@@ -85,11 +84,25 @@ const server = http.createServer(async (req, res) => {
     await page.waitForTimeout(100);
     assert.equal(data.writings[0].reviewInput.original,'Original essay');
     assert.equal(await page.locator('#reviewWorkspace').isVisible(),true);
-    await checkMarkdown('#reviewWorkspaceFeedback');
+    await checkMarkdown('#reviewOverviewSummary');
     assert.equal(await page.locator('#reviewWorkspacePrompt').textContent(),'Writing question');
     assert.equal(await page.locator('#reviewWorkspaceAudio').isVisible(),false);
     assert.equal(await page.locator('#reviewWorkspaceNavigation button').count(),1);
-    assert.equal(await page.locator('#reviewWorkspaceFeedback .review-report-card').count(),1);
+    assert.equal(await page.locator('#reviewWorkspaceFeedback .review-report-card').count(),0);
+    const orderedReport = await page.evaluate(() => {
+      const source = '主题：城市交通\n\n### 评分与小分\n\n**总分：6.5**\n\n| 小分 | 分数 |\n|---|---|\n| TR | 6.5 |\n\n### 总体评价\n\n任务完成清晰。\n\n### 确定语法错误\n\n没有确定错误。\n\n### 原文优化建议\n\n可补充例证。\n\n### 目标水平范文\n\nModel answer.\n\n### 最终值得记忆的语料\n\npublic transport';
+      window.renderReviewReport(document.querySelector('#reviewWorkspaceFeedback'), source, document.querySelector('#reviewWorkspaceNavigation'), {scoreElement:document.querySelector('#reviewScoreSummary'),overviewElement:document.querySelector('#reviewOverviewSummary')});
+      return {
+        score:document.querySelector('#reviewScoreSummary').textContent,
+        overview:document.querySelector('#reviewOverviewSummary').textContent,
+        report:document.querySelector('#reviewWorkspaceFeedback').textContent,
+        headings:[...document.querySelectorAll('#reviewWorkspaceFeedback h3')].map(node=>node.textContent)
+      };
+    });
+    assert.match(orderedReport.score,/总分：6.5/);
+    assert.match(orderedReport.overview,/任务完成清晰/);
+    assert.doesNotMatch(orderedReport.report,/主题：城市交通|评分与小分|总体评价/);
+    assert.deepEqual(orderedReport.headings,['确定语法错误','原文优化建议','目标水平范文','最终值得记忆的语料']);
     const annotated = await page.evaluate(() => {
       const original = 'I likes cycling. It make me happy. Same. Same.';
       const markdown = '### 逐句纠错\n\n| 原文 | 修改 | 类型 | 原因 |\n| --- | --- | --- | --- |\n| I likes | I like | 语法 | 主谓一致 |\n| Same. | Different. | 表达 | 重复片段 |\n| not present | other | 表达 | 不匹配 |\n| likes cycling | like cycling | 语法 | 重叠 |\n\n- **原文**: `...It make me happy....`\n  - **局部修改**: `It makes me happy.`\n  - **错误类型**: 语法\n  - **原因**: 主谓一致';
@@ -126,7 +139,7 @@ const server = http.createServer(async (req, res) => {
     await page.locator('#closeReviewWorkspace').click();
     await page.reload();
     await page.locator('[data-writing-id="w1"]').click();
-    await checkMarkdown('#reviewWorkspaceFeedback');
+    await checkMarkdown('#reviewOverviewSummary');
     await page.reload();
     assert.equal(await page.locator('#reviewWorkspace').isVisible(),true,'direct report route must restore on reload');
     assert.equal(await page.locator('#reviewWorkspaceOriginal').textContent(),'Original essay');
