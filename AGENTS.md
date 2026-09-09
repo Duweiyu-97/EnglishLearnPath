@@ -70,3 +70,4 @@ When the user corrects an implementation or workflow, fix the current issue and 
 [ARCH] The local launcher must bind only to a free loopback port selected atomically by the operating system, so an occupied port can never prevent startup or connect a new launch to an older process.
 [UI] The personal language-bank page must not display accumulated AI summary prose or source-count metadata as a permanent card; lead directly into the speaking and writing material tabs, reserving status UI for active work or errors.
 [UI] Speaking expressions and answer frames use the same bilingual hierarchy as writing language: English on the primary line and its concise Chinese translation below, including normalized legacy entries.
+[WORKFLOW] Keep the README screenshot gallery to one or two representative, polished product views; remove obsolete or anomalous screenshots instead of documenting every page.

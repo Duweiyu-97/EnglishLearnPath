@@ -42,14 +42,6 @@
 
 ![写作工坊](docs/images/writing.png)
 
-![口语录音与文字稿](docs/images/speaking.png)
-
-![复盘优先的学习计划](docs/images/plan.png)
-
-![单题复盘与 Markdown 排版（示例数据）](docs/images/question-review.png)
-
-![首次启动时选择永久数据文件夹](docs/images/storage.png)
-
 ## AI 配置
 
 写作与口语批改会一并使用“学习计划”中已保存的现有水平、目标水平及重点，让修改建议贴合当前能力、示范答案对齐目标。未填写时会注明未提供，不会擅自设定目标分数。
