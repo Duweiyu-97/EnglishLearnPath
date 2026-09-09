@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const markdown = '### 总体表现\n\n**重点**与 *表达*\n\n- 第一项\n- 第二项\n\n---\n\n> 建议\n\n| 原文 | 修改 |\n| --- | --- |\n| a | b |\n\n```text\n<script>unsafe()</script>\n```\n\n[官方链接](https://example.com)\n\n<img src="https://tracking.invalid/pixel" onerror="window.pwned=1"><script>window.pwned=1</script>[坏链接](javascript:alert(1))';
 let data = {
-  writings: [{ id: 'w1', type: 'Task 2', minutes: 40, prompt: 'Writing question', essay: 'Original essay', review: markdown, updatedAt: '2026-09-01T10:00:00Z' }],
+  writings: [{ id: 'w1', type: 'Task 2', minutes: 40, prompt: 'Writing question', promptImages: ['data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='], essay: 'Original essay', review: markdown, reviewInput: { original: 'Original essay', type: 'Task 2' }, updatedAt: '2026-09-01T10:00:00Z' }],
   speaking: [{ id: 's1', part: 'p1', prompt: 'Do you enjoy cycling?', transcript: 'I like cycling.', punctuationSource:'I like cycling.', punctuatedTranscript:'I like cycling.', review: markdown, updatedAt: '2026-09-01T10:00:00Z', audio: 'data:audio/webm;base64,dGVzdA==' }],
   mistakes: []
 };
@@ -58,7 +58,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.locator('#reviewWorkspaceAudio').isVisible(),true);
     assert.match(await page.locator('#reviewWorkspaceAudio').getAttribute('src'), /^blob:/, 'audio must comply with the launcher CSP');
     assert.equal(chatCalls,0,'opening a review must not call AI');
-    await page.locator('#editReviewSource').click();
+    await page.locator('#retryReviewSource').click();
     assert.equal(await page.locator('#reviewWorkspace').isVisible(),false);
     assert.equal(await page.locator('#speakingTranscript').inputValue(),'I like cycling.');
     assert.equal(await page.locator('#speakingReview').isVisible(),false,'editor must not display the old report');
@@ -69,28 +69,44 @@ const server = http.createServer(async (req, res) => {
     assert.equal(data.speaking[0].reviewInput.original,'I like cycling.');
     assert.equal(await page.locator('#reviewWorkspace').isVisible(),true,'finished feedback opens the dedicated report');
     await page.locator('#closeReviewWorkspace').click();
+    assert.equal(await page.locator('#speakingOverviewView').isVisible(),true,'closing a report returns to the speaking overview');
+    await page.locator('[data-speaking-id="s1"]').click();
+    await page.locator('#retryReviewSource').click();
     await page.locator('#speakingTranscript').fill('A later edit.');
-    await page.locator('#openSpeakingReview').click();
+    await page.locator('[data-speaking-id="s1"]').click();
     assert.equal(await page.locator('#reviewWorkspaceOriginal').textContent(),'I like cycling.');
     await page.locator('#closeReviewWorkspace').click();
     assert.equal(await page.locator('#speakingTranscript').inputValue(),'A later edit.');
     await page.locator('.nav-item[data-route="writing"]').click();
     await page.locator('[data-writing-id="w1"]').click();
     assert.match(page.url(), /#review\/writing\/w1$/);
-    await page.locator('#editReviewSource').click();
+    assert.equal(await page.locator('#reviewWorkspaceImages .review-image-preview').count(),1);
+    assert.ok(await page.locator('#reviewWorkspaceImages .review-image-preview').evaluate(node => node.getBoundingClientRect().height <= 250),'question image preview must remain compact');
+    await page.locator('#reviewWorkspaceImages .review-image-preview').click();
+    assert.equal(await page.locator('#reviewImageLightbox').isVisible(),true,'question image can be enlarged full screen');
+    await page.keyboard.press('Escape');
+    assert.equal(await page.locator('#reviewImageLightbox').isVisible(),false,'Escape closes the full-screen image');
+    await page.locator('#retryReviewSource').click();
     assert.equal(await page.locator('#writingReview').isVisible(),false,'editor must not display the old report');
+    assert.equal(await page.locator('#writingEssay').inputValue(),'','rewriting must start from a blank answer');
+    await page.locator('#writingEssay').fill('Rewritten essay');
+    assert.equal(await page.locator('#reviewWriting').isVisible(),false,'focused rewriting keeps post-answer actions hidden');
+    await page.locator('#finishWritingSession').click();
     await page.locator('#reviewWriting').click();
-    await page.waitForURL('**/#review/writing/w1');
+    await page.waitForURL(/#review\/writing\//);
     await page.waitForTimeout(100);
-    assert.equal(data.writings[0].reviewInput.original,'Original essay');
+    assert.equal(data.writings.find(item => item.id === 'w1').essay,'Original essay','the reviewed source attempt must remain unchanged');
+    assert.equal(data.writings.find(item => item.id !== 'w1')?.reviewInput?.original,'Rewritten essay','the rewrite must be saved as a separate attempt');
     assert.equal(await page.locator('#reviewWorkspace').isVisible(),true);
     await checkMarkdown('#reviewOverviewSummary');
     assert.equal(await page.locator('#reviewWorkspacePrompt').textContent(),'Writing question');
     assert.equal(await page.locator('#reviewWorkspaceAudio').isVisible(),false);
-    assert.equal(await page.locator('#reviewWorkspaceNavigation button').count(),1);
+    assert.equal(await page.locator('#reviewWorkspaceNavigation button').count(),0,'the report does not need a chapter-navigation button row');
+    const coreSectionOrder = await page.locator('#reviewWorkspace').evaluate(root => ['.review-question','#reviewScorePanel','#reviewOverviewPanel','.review-source:not(.hidden)','#reviewCorrectionsSection'].map(selector => root.querySelector(selector).getBoundingClientRect().top));
+    assert.deepEqual(coreSectionOrder,[...coreSectionOrder].sort((a,b)=>a-b),'all review types must use the same visible core-section order');
     assert.equal(await page.locator('#reviewWorkspaceFeedback .review-report-card').count(),0);
     const orderedReport = await page.evaluate(() => {
-      const source = '主题：城市交通\n\n### 评分与小分\n\n**总分：6.5**\n\n| 小分 | 分数 |\n|---|---|\n| TR | 6.5 |\n\n### 总体评价\n\n任务完成清晰。\n\n### 确定语法错误\n\n没有确定错误。\n\n### 原文优化建议\n\n可补充例证。\n\n### 目标水平范文\n\nModel answer.\n\n### 最终值得记忆的语料\n\npublic transport';
+      const source = '主题：城市交通\n\n### 评分与小分\n\n**总分：6.5**\n\n| 项目 | 分数 | 证据 |\n|---|---|---|\n| TR | 6.5 | 完成任务，但论证仍可补充具体例证。 |\n| CC | 6.5 | 段落清楚，部分衔接略显生硬。 |\n| LR | 6.5 | 词汇足以表达观点，可增加搭配准确性。 |\n| GRA | 6.0 | 句式有变化，但仍有少量确定语法错误。 |\n\n### 总体评价\n\n任务完成清晰。\n\n### 确定语法错误\n\n没有确定错误。\n\n### 原文优化建议\n\n可补充例证。\n\n### 目标水平范文\n\nModel answer.\n\n### 最终值得记忆的语料\n\npublic transport';
       window.renderReviewReport(document.querySelector('#reviewWorkspaceFeedback'), source, document.querySelector('#reviewWorkspaceNavigation'), {scoreElement:document.querySelector('#reviewScoreSummary'),overviewElement:document.querySelector('#reviewOverviewSummary')});
       return {
         score:document.querySelector('#reviewScoreSummary').textContent,
@@ -99,10 +115,29 @@ const server = http.createServer(async (req, res) => {
         headings:[...document.querySelectorAll('#reviewWorkspaceFeedback h3')].map(node=>node.textContent)
       };
     });
-    assert.match(orderedReport.score,/总分：6.5/);
+    assert.match(orderedReport.score,/总分.*6.5/);
+    assert.equal(await page.locator('#reviewScoreSummary .score-highlight strong').textContent(),'6.5');
+    assert.equal(await page.locator('#reviewScoreSummary .score-overview-grid').count(),1);
+    assert.equal(await page.locator('#reviewScoreSummary .score-criterion-card').count(),4);
+    const scoreLayout = await page.locator('#reviewScoreSummary .score-overview-grid').evaluate(node => {
+      const grid = node.getBoundingClientRect(), criteria = node.querySelector('.score-criteria-grid').getBoundingClientRect(), score = node.querySelector('.score-highlight strong');
+      const criterion = node.querySelector('.score-criterion-card').getBoundingClientRect();
+      return {gridWidth:grid.width, gridHeight:grid.height, criteriaWidth:criteria.width, criterionHeight:criterion.height, scoreSize:parseFloat(getComputedStyle(score).fontSize)};
+    });
+    assert.ok(scoreLayout.gridWidth > 900 && scoreLayout.criteriaWidth > 600, 'criterion cards must use the available report width');
+    assert.ok(scoreLayout.scoreSize >= 46 && scoreLayout.scoreSize <= 58, 'overall score must use restrained serif typography');
+    assert.ok(scoreLayout.gridHeight <= 255 && scoreLayout.criterionHeight <= 122, 'the score summary must leave room for following feedback');
     assert.match(orderedReport.overview,/任务完成清晰/);
     assert.doesNotMatch(orderedReport.report,/主题：城市交通|评分与小分|总体评价/);
     assert.deepEqual(orderedReport.headings,['确定语法错误','原文优化建议','目标水平范文','最终值得记忆的语料']);
+    await page.evaluate(() => {
+      const source = '### 评分与小分\n\n**总分：5.5–6.0**\n\n| 项目 | 分数 | 证据 |\n|---|---|---|\n| Fluency & Coherence | 5.5 | 能表达主要意思。 |\n| Lexical Resource | 5.5 | 词汇范围有限。 |\n| Grammar Range & Accuracy | 5.5 | 有一些语法错误。 |\n| Pronunciation | 不可仅凭转写判断 | 无法评估重音、连读和语调。 |';
+      window.renderReviewReport(document.querySelector('#reviewWorkspaceFeedback'), source, document.querySelector('#reviewWorkspaceNavigation'), {scoreElement:document.querySelector('#reviewScoreSummary'),overviewElement:document.querySelector('#reviewOverviewSummary')});
+    });
+    assert.equal(await page.locator('#reviewScoreSummary .score-highlight strong').textContent(),'5.5–6.0');
+    assert.equal(await page.locator('#reviewScoreSummary .score-highlight strong').evaluate(node => getComputedStyle(node).whiteSpace),'nowrap','overall band range must stay on one line');
+    assert.equal(await page.locator('#reviewScoreSummary .score-status').textContent(),'不可仅凭转写判断');
+    assert.ok(await page.locator('#reviewScoreSummary .score-status').evaluate(node => parseFloat(getComputedStyle(node).fontSize)) < 20,'non-numeric score limitations must not use oversized score typography');
     const annotated = await page.evaluate(() => {
       const original = 'I likes cycling. It make me happy. Same. Same.';
       const markdown = '### 逐句纠错\n\n| 原文 | 修改 | 类型 | 原因 |\n| --- | --- | --- | --- |\n| I likes | I like | 语法 | 主谓一致 |\n| Same. | Different. | 表达 | 重复片段 |\n| not present | other | 表达 | 不匹配 |\n| likes cycling | like cycling | 语法 | 重叠 |\n\n- **原文**: `...It make me happy....`\n  - **局部修改**: `It makes me happy.`\n  - **错误类型**: 语法\n  - **原因**: 主谓一致';
@@ -196,8 +231,8 @@ const server = http.createServer(async (req, res) => {
     await page.locator('#menuButton').click();
     await page.locator('.nav-item[data-route="writing"]').click();
     const layout = await page.locator('.record-list-item').first().evaluate(el=>{
-      const card=el.querySelector('.library-item').getBoundingClientRect(), button=el.querySelector('.record-delete').getBoundingClientRect(), title=el.querySelector('strong').getBoundingClientRect();
-      return {inside:button.right<=card.right && button.left>=card.left && button.top>=card.top && button.bottom<=card.bottom, reserved:parseFloat(getComputedStyle(el.querySelector('strong')).paddingRight), font:parseFloat(getComputedStyle(el.querySelector('.record-delete')).fontSize)};
+      const card=el.querySelector('.library-item').getBoundingClientRect(), button=el.querySelector('.record-delete').getBoundingClientRect();
+      return {inside:button.right<=card.right && button.left>=card.left && button.top>=card.top && button.bottom<=card.bottom, reserved:parseFloat(getComputedStyle(el.querySelector('.record-title-row')).paddingRight), font:parseFloat(getComputedStyle(el.querySelector('.record-delete')).fontSize)};
     });
     assert.equal(layout.inside,true);
     assert.ok(layout.reserved>=38 && layout.font<=12);

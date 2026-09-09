@@ -67,7 +67,7 @@ function harness(initialState, localWhisper) {
         const request = JSON.parse(options.body);
         chatRequests.push(request);
         const content = request.output_contract === 'personal-language-bank-json-v1'
-          ? JSON.stringify({summary:'My bank',speaking:[{title:'Cycling',personalCore:'I enjoy cycling with friends.',reusableTopics:['hobbies'],expressions:['clear my mind'],answerFrames:['answer → reason → example']}],writing:[{domain:'education',collocations:['equal access'],sentencePatterns:['It is important to...']} ]})
+          ? JSON.stringify({summary:'My bank',speaking:[{title:'Cycling',personalCore:'I enjoy cycling with friends.',reusableTopics:['hobbies'],expressions:['clear my mind'],answerFrames:['answer → reason → example']}],writing:[{domain:'education',collocations:['equal access｜平等的机会'],sentencePatterns:['It is important to...｜……十分重要']} ]})
           : 'Synthetic feedback';
         return { ok: true, json: async () => ({ content }) };
       }
@@ -219,14 +219,23 @@ try {
   assert.equal(h.chatRequests.at(-1).output_contract, 'personal-language-bank-json-v1');
   assert.equal(h.api.state.languageBank.speaking[0].title, 'Cycling');
   assert.equal(h.api.state.languageBank.writing[0].domain, 'education');
+  assert.match(h.api.state.languageBank.writing[0].collocations[0], /｜平等的机会/);
+  assert.match(h.chatRequests.at(-1).messages[0].content, /中文翻译/);
+  const translationUpgrade = harness({ writings: [], speaking: [], languageBank: { summary:'Legacy', speaking:[], writing:[{domain:'education',collocations:['equal access'],sentencePatterns:[]}], sourceKeys:[] } });
+  translationUpgrade.api.enableAi();
+  await translationUpgrade.api.generateLanguageBank();
+  assert.equal(translationUpgrade.chatRequests.length, 1, 'legacy translation enrichment runs only after the user explicitly updates the bank');
+  assert.equal(translationUpgrade.api.state.languageBank.writing[0].collocations[0], 'equal access｜平等的机会', 'translation enrichment supplements the existing English item instead of duplicating it');
   const manyRecords = harness({
     speaking: Array.from({length: 40}, (_, index) => ({id:`s${index}`, part:'p1', prompt:`Question ${index} ${'q'.repeat(1200)}`, transcript:`Answer ${index} ${'a'.repeat(3000)}`, review:'f'.repeat(1800), updatedAt:new Date(2026, 0, index + 1).toISOString()})),
     writings: Array.from({length: 30}, (_, index) => ({id:`w${index}`, type:'Task 2', prompt:`Writing ${index} ${'q'.repeat(1200)}`, essay:`Essay ${index} ${'e'.repeat(3500)}`, review:'f'.repeat(1800), updatedAt:new Date(2026, 1, index + 1).toISOString()}))
   });
-  const boundedSource = manyRecords.api.languageBankSource();
-  assert.ok(JSON.stringify(boundedSource).length <= 85000, 'manual language-bank input must stay below the launcher request limit');
-  assert.match(boundedSource.speaking[0]?.question || '', /Question 39/, 'the newest speaking records must be retained first');
-  assert.match(boundedSource.writing[0]?.question || '', /Writing 29/, 'the newest writing records must be retained first');
+  const completeSource = manyRecords.api.languageBankSource();
+  assert.equal(completeSource.speaking.length, 40, 'language-bank source must retain every speaking record');
+  assert.equal(completeSource.writing.length, 30, 'language-bank source must retain every writing record');
+  assert.match(completeSource.speaking[0]?.question || '', /Question 39/, 'the newest speaking records must be retained first');
+  assert.match(completeSource.writing[0]?.question || '', /Writing 29/, 'the newest writing records must be retained first');
+  assert.equal(completeSource.writing[0].answer.length, 'Essay 29 '.length + 3500, 'a complete writing answer must not be truncated before staged extraction');
   h.api.state.studyPlan = null;
   assert.match(h.api.reviewLearnerContext('写作'), /现有水平（用户自述）：未提供/);
   assert.match(h.api.reviewLearnerContext('写作'), /目标水平（用户设定）：未提供/);

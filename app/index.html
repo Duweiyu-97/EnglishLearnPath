@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#16352f">
   <meta name="description" content="English Learning Path：本地优先、可自行导入材料的英语学习中心。">
   <title>English Learning Path · 英语学习路径</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=20260909l">
 </head>
 <body>
   <div class="app-shell">
@@ -72,94 +72,126 @@
 
         <section class="today-plan panel">
           <div class="panel-title"><div><span class="kicker">TODAY'S ACTIONS</span><h3>今日学习计划</h3><p id="todayPlanMeta">配置考试目标后，这里会生成可执行任务。</p></div><button class="button button-secondary" data-route="plan">配置计划</button></div>
-          <div id="todayPlanList" class="today-task-list empty-state">尚未创建学习计划</div>
+          <div id="todayPlanSummary" class="today-plan-summary empty-state">尚未创建学习计划</div>
+          <details id="todayPlanDetails" class="today-plan-details hidden"><summary>展开查看今日任务细节</summary><div id="todayPlanList" class="today-task-list"></div></details>
         </section>
 
       </section>
 
       <section class="page" data-page="writing">
-        <div class="page-intro panel compact-panel">
-          <div><span class="kicker">WRITING STUDIO</span><h2>写作工坊</h2><p>不预置私人模板或课程资料。用你自己的题目完成计时写作，并把每一次修改留在本机。</p></div>
-          <button id="newWriting" class="button button-primary">新建写作</button>
-        </div>
-        <div class="writing-layout">
+        <div class="writing-studio-shell">
           <aside class="writing-sidebar panel">
-            <div class="panel-title"><h3>写作记录</h3><span id="writingCount" class="count-pill">0</span></div>
+            <div class="writing-sidebar-heading"><div><span class="kicker">WRITEPATH</span><h3>写作记录</h3></div><span id="writingCount" class="count-pill">0</span></div>
+            <button id="newWriting" class="button button-primary writing-new-button"><span>＋</span> 新建练习</button>
+            <div class="history-filters" role="group" aria-label="筛选写作记录"><button class="is-selected" type="button" data-writing-filter="all">全部</button><button type="button" data-writing-filter="task1">Task 1</button><button type="button" data-writing-filter="task2">Task 2</button></div>
             <div id="writingHistory" class="library-list empty-state">还没有写作记录</div>
           </aside>
-          <div class="writing-editor panel">
-            <div class="editor-toolbar">
-              <label class="mini-field"><span>类型</span><select id="writingType"><option>Task 2</option><option>Task 1 Academic</option><option>Task 1 General</option><option>自由写作</option></select></label>
-              <label class="mini-field"><span>目标时间</span><select id="writingMinutes"><option value="40">40 分钟</option><option value="20">20 分钟</option><option value="60">60 分钟</option><option value="0">不计时</option></select></label>
-              <div class="timer" id="writingTimer">40:00</div>
-              <button id="toggleTimer" class="button button-secondary">开始计时</button>
-              <button id="writingFocusMode" class="button button-quiet">专注答题</button>
-            </div>
-            <div class="writing-compose-grid">
-              <section class="writing-question-pane">
-                <label class="field"><span>题目</span><textarea id="writingPrompt" rows="5" placeholder="粘贴或输入你有权使用的题目；也可以在这里按 Ctrl+V 粘贴题目图片……"></textarea></label>
-                <div class="writing-prompt-image-tools"><label class="button button-quiet file-button">选择题目图片<input id="writingPromptImageInput" type="file" accept="image/*" multiple></label><span>支持图表、流程图、地图或题目截图，最多 6 张</span></div>
-                <div id="writingPromptImagePreview" class="writing-prompt-images empty-state">尚未添加题目图片</div>
+          <div class="writing-main">
+            <section id="writingOverviewView" class="practice-overview panel">
+              <header class="practice-overview-hero"><div><span class="kicker">WRITING STUDIO</span><h2>今天的写作重点</h2><p>先回忆少量语料，再决定是否开始一篇新练习。</p></div></header>
+              <section class="daily-writing-language" aria-labelledby="dailyWritingLanguageTitle">
+                <header><div><span class="kicker">TODAY'S LANGUAGE CHALLENGE</span><h3 id="dailyWritingLanguageTitle">今天试着用进作文</h3></div><p>从你的个人语料库中每日轮换；选 1–2 条自然地用进本次写作，不要生硬堆砌。</p></header>
+                <div id="dailyWritingLanguage" class="daily-language-cards empty-state">生成个人写作语料库后，这里会每天推荐少量搭配与句式。</div>
               </section>
-              <label class="field essay-field"><span>正文</span><textarea id="writingEssay" placeholder="Start writing here..." spellcheck="true"></textarea></label>
-            </div>
-            <div class="editor-footer"><span><strong id="wordCount">0</strong> words</span><span id="saveStatus">内容会自动保存到本机</span></div>
-            <div class="button-row writing-actions"><button id="reviewWriting" class="button button-primary ai-required">AI 写作反馈</button><button id="addWritingMistake" class="button button-quiet">记录本题复盘</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div>
-            <p class="privacy-hint">AI 批改会使用学习计划中已保存的现有水平、目标水平和重点。带题图时，图片会和题目、正文一起发送到你配置的 AI；DeepSeek 会自动使用视觉模型。</p>
-            <button id="openWritingReview" class="button button-secondary review-open-button">打开本题复盘 · 题目 / 原稿 / 修改</button>
-            <div id="writingReview" class="ai-output hidden"></div>
+              <section class="overview-plan"><header><span class="kicker">TODAY'S PLAN</span><h3>今日写作安排</h3></header><div id="writingOverviewPlan" class="overview-plan-list"></div></section>
+            </section>
+            <section id="writingSetupView" class="writing-setup-view panel hidden">
+              <header class="writing-setup-hero"><div><span class="kicker">START A SESSION</span><h2>今天练习哪一种写作？</h2><p>选择题型、导入题目，然后进入计时写作。</p></div><button id="closeWritingSetup" class="button button-quiet" type="button">返回概览</button></header>
+              <div class="writing-setup-card">
+                <span class="setup-step">01 · 选择题型</span>
+                <div class="writing-task-options" role="radiogroup" aria-label="写作题型">
+                  <button class="writing-task-option" data-writing-type="Task 1 Academic" data-writing-minutes="20" type="button"><em>01</em><span><strong>小作文 · Task 1</strong><small>图表、流程图、地图或书信写作</small></span><b>20 min</b></button>
+                  <button class="writing-task-option is-selected" data-writing-type="Task 2" data-writing-minutes="40" type="button"><em>02</em><span><strong>大作文 · Task 2</strong><small>观点、讨论、问题解决或混合题型</small></span><b>40 min</b></button>
+                </div>
+                <label class="mini-field writing-hidden-select"><span>类型</span><select id="writingType"><option>Task 2</option><option>Task 1 Academic</option><option>Task 1 General</option><option>自由写作</option></select></label>
+                <label class="mini-field writing-hidden-select"><span>目标时间</span><select id="writingMinutes"><option value="40">40 分钟</option><option value="20">20 分钟</option><option value="60">60 分钟</option><option value="0">不计时</option></select></label>
+                <span class="setup-step prompt-step">02 · 导入题目</span>
+                <div class="writing-prompt-tabs"><button type="button" data-prompt-mode="text">仅文字</button><button type="button" data-prompt-mode="image">仅图片</button><button class="is-selected" type="button" data-prompt-mode="mixed">文字 + 图片</button><small>文字与图片会一起自动保存</small></div>
+                <label id="writingPromptPanel" class="field writing-prompt-panel"><span class="sr-only">题目文字</span><textarea id="writingPrompt" rows="7" placeholder="在这里输入或粘贴题目文字；如果题目还有图表，可在下方继续添加图片……"></textarea></label>
+                <div id="writingImagePanel" class="writing-image-panel">
+                  <label class="writing-upload-zone file-button"><input id="writingPromptImageInput" type="file" accept="image/*" multiple><span>⌘</span><strong>复制图片后，直接在本页按 Ctrl+V</strong><small>也可以点击选择图片 · 最多 6 张</small></label>
+                  <div id="writingPromptImagePreview" class="writing-prompt-images empty-state">尚未添加题目图片</div>
+                </div>
+                <div class="writing-setup-actions"><p><i></i> 开始后自动计时并实时保存</p><button id="startWritingSession" class="button button-primary">开始 40 分钟练习 <span>→</span></button></div>
+              </div>
+            </section>
+
+            <section id="writingSessionView" class="writing-session-view hidden">
+              <div class="writing-session-toolbar panel">
+                <div><span id="writingSessionBadge" class="session-badge">TASK 2 · 第 1 次</span><small id="writingSessionState">写作中</small></div>
+                <div class="timer-block"><span id="writingTimerLabel">剩余时间</span><div class="timer" id="writingTimer">40:00</div></div>
+                <div class="writing-session-actions"><button id="toggleTimer" class="button button-secondary">暂停</button><button id="finishWritingSession" class="button button-dark">完成写作</button><button id="exitFocusMode" class="button button-secondary exit-focus hidden" type="button">退出专注</button></div>
+              </div>
+              <div class="writing-workspace-grid">
+                <article class="writing-workspace-card writing-question-card"><header><span>QUESTION</span><button id="writingFocusMode" class="button button-quiet focus-entry">专注答题</button></header><div id="writingSessionQuestion" class="writing-session-question"></div></article>
+                <article class="writing-workspace-card writing-answer-card"><header><div><span>YOUR RESPONSE</span><small id="writingAnswerHint">建议至少 250 英文词（数字与标点不计）</small></div><div><strong id="wordCount">0</strong> 英文词</div></header><textarea id="writingEssay" placeholder="Start writing here..." spellcheck="true"></textarea></article>
+              </div>
+              <div class="writing-session-footer"><span id="saveStatus">内容会自动保存到本机</span><div class="button-row writing-actions"><button id="reviewWriting" class="button button-primary ai-required">AI 写作反馈</button><button id="addWritingMistake" class="button button-quiet">记录本题复盘</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div></div>
+              <div id="writingReview" class="ai-output hidden"></div>
+            </section>
           </div>
         </div>
       </section>
 
       <section class="page" data-page="speaking">
-        <div class="page-intro panel compact-panel">
-          <div><span class="kicker">SPEAKING ROOM</span><h2>口语练习</h2><p>一次录音，自动转写。完整包在录音结束后离线识别，并把录音与文字稿自动永久保存到本地；后续校对修改也会自动写盘。只有文字稿可按需交给 AI 评价。</p></div>
-          <button id="newSpeaking" class="button button-primary">新建口语练习</button>
-        </div>
-        <div class="speaking-grid">
-          <div class="panel speaking-recorder">
-            <div class="speaking-toolbar"><label class="mini-field"><span>题型</span><select id="speakingPart"><option value="p1">Part 1</option><option value="p2">Part 2</option><option value="p3">Part 3</option><option value="free">自由表达</option></select></label><button id="speakingFocusMode" class="button button-quiet">专注答题</button></div>
-            <label class="field"><span>练习话题</span><textarea id="speakingPrompt" rows="4" placeholder="输入今天想练习的话题或问题……"></textarea></label>
-            <div id="speakingPartGuide" class="part-guide" role="status"></div>
-            <div class="recorder-stage">
-              <div id="recordPulse" class="record-pulse"><span>00:00</span></div>
-              <button id="recordButton" class="record-button">开始录音并转写</button>
-              <p id="recordHint">首次使用需允许麦克风；本地 Whisper 会在录音结束后自动生成文字稿</p>
+        <div class="speaking-studio-shell">
+          <aside class="writing-sidebar speaking-history-sidebar panel">
+            <div class="writing-sidebar-heading"><div><span class="kicker">SPEAKPATH</span><h3>口语记录</h3></div><span id="speakingCount" class="count-pill">0</span></div>
+            <button id="newSpeaking" class="button button-primary writing-new-button"><span>＋</span> 新建练习</button>
+            <div class="history-filters speaking-history-filters" role="group" aria-label="筛选口语记录"><button class="is-selected" type="button" data-speaking-filter="all">全部</button><button type="button" data-speaking-filter="p1">Part 1</button><button type="button" data-speaking-filter="p2">Part 2</button><button type="button" data-speaking-filter="p3">Part 3</button><button type="button" data-speaking-filter="free">自由</button></div>
+            <div id="speakingHistory" class="library-list empty-state">还没有口语练习记录</div>
+          </aside>
+          <div class="speaking-main">
+            <section id="speakingOverviewView" class="practice-overview panel">
+              <header class="practice-overview-hero"><div><span class="kicker">SPEAKING ROOM</span><h2>今天的口语重点</h2><p>先热身和回忆表达；需要练习时，再从左侧新建一次录音。</p></div></header>
+              <section class="daily-speaking-language" aria-labelledby="dailySpeakingLanguageTitle"><header><div><span class="kicker">OPTIONAL FLUENCY BOOST</span><h3 id="dailySpeakingLanguageTitle">今天可以主动带入</h3></div><p>只作建议，不强制使用；每天从已保存的通用表达中轮换。</p></header><div id="dailySpeakingLanguage" class="daily-language-cards"></div></section>
+              <section class="overview-plan"><header><span class="kicker">TODAY'S PLAN</span><h3>今日口语安排</h3></header><div id="speakingOverviewPlan" class="overview-plan-list"></div></section>
+            </section>
+            <section id="speakingPracticeView" class="speaking-practice-view hidden">
+              <div class="speaking-practice-heading"><div><span class="kicker">NEW SPEAKING PRACTICE</span><h2>完成一次口语练习</h2></div><button id="closeSpeakingPractice" class="button button-quiet" type="button">返回概览</button></div>
+              <div class="panel speaking-grid">
+              <div class="speaking-recorder">
+                <div class="speaking-toolbar"><label class="mini-field"><span>题型</span><select id="speakingPart"><option value="p1">Part 1</option><option value="p2">Part 2</option><option value="p3">Part 3</option><option value="free">自由表达</option></select></label></div>
+                <label class="field"><span>练习话题</span><textarea id="speakingPrompt" rows="4" placeholder="输入今天想练习的话题或问题……"></textarea></label>
+                <div id="speakingPartGuide" class="part-guide" role="status"></div>
+                <div class="recorder-stage">
+                  <div id="recordPulse" class="record-pulse"><small id="recordPhaseLabel">等待开始</small><span>00:00</span></div>
+                  <button id="recordButton" class="record-button">开始录音并转写</button>
+                  <p id="recordHint">首次使用需允许麦克风；本地 Whisper 会在录音结束后自动生成文字稿</p>
+                </div>
+                <audio id="speakingPlayback" class="audio-player hidden" controls></audio>
+                <button id="downloadRecording" class="button button-quiet hidden">下载本次录音</button>
+              </div>
+              <div class="transcript-panel">
+                <div class="panel-title"><div><span class="kicker">TRANSCRIPT</span><h3>文字稿与复盘</h3></div></div>
+                <div class="transcription-toolbar"><label class="mini-field"><span>转写语言</span><select id="speechLanguage"><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option></select></label><span class="integrated-transcription-note">录音结束后自动离线转写</span></div>
+                <p id="transcriptionStatus" class="privacy-hint">正在检查本地语音组件……</p>
+                <div class="button-row transcription-actions"><button id="retryLocalTranscription" type="button" class="button button-secondary">重新转写本次录音</button><button id="cancelLocalTranscription" type="button" class="button button-quiet hidden">取消转写</button></div>
+                <textarea id="speakingTranscript" class="transcript-area" placeholder="录音结束后会自动显示本地 Whisper 识别结果。请回听核对，也可以手动修改或补充。"></textarea>
+                <p id="speakingSaveStatus" class="autosave-status">录音、文字稿与修改会自动保存到本机</p>
+                <div class="button-row speaking-actions"><button id="reviewSpeaking" class="button button-primary ai-required">AI 评价与修改</button><button id="addSpeakingMistake" class="button button-quiet">记录本题复盘</button><button id="deleteSpeaking" class="button button-danger-quiet hidden">删除记录</button></div>
+                <p class="privacy-hint">AI 批改会使用学习计划中已保存的现有水平、目标水平和重点；未填写的项目会明确标为未提供。</p>
+                <div id="speakingReview" class="ai-output hidden"></div>
+              </div>
             </div>
-            <audio id="speakingPlayback" class="audio-player hidden" controls></audio>
-            <button id="downloadRecording" class="button button-quiet hidden">下载本次录音</button>
-          </div>
-          <div class="panel transcript-panel">
-            <div class="panel-title"><div><span class="kicker">TRANSCRIPT</span><h3>文字稿与复盘</h3></div></div>
-            <div class="transcription-toolbar"><label class="mini-field"><span>转写语言</span><select id="speechLanguage"><option value="en-GB">English (UK)</option><option value="en-US">English (US)</option></select></label><span class="integrated-transcription-note">录音结束后自动离线转写</span></div>
-            <p id="transcriptionStatus" class="privacy-hint">正在检查本地语音组件……</p>
-            <div class="button-row transcription-actions"><button id="retryLocalTranscription" type="button" class="button button-secondary">重新转写本次录音</button><button id="cancelLocalTranscription" type="button" class="button button-quiet hidden">取消转写</button></div>
-            <textarea id="speakingTranscript" class="transcript-area" placeholder="录音结束后会自动显示本地 Whisper 识别结果。请回听核对，也可以手动修改或补充。"></textarea>
-            <p id="speakingSaveStatus" class="autosave-status">录音、文字稿与修改会自动保存到本机</p>
-            <div class="button-row speaking-actions"><button id="reviewSpeaking" class="button button-primary ai-required">AI 评价与修改</button><button id="addSpeakingMistake" class="button button-quiet">记录本题复盘</button><button id="deleteSpeaking" class="button button-danger-quiet hidden">删除记录</button></div>
-            <p class="privacy-hint">AI 批改会使用学习计划中已保存的现有水平、目标水平和重点；未填写的项目会明确标为未提供。</p>
-            <button id="openSpeakingReview" class="button button-secondary review-open-button">打开本题复盘 · 话题 / 录音 / 修改</button>
-            <div id="speakingReview" class="ai-output hidden"></div>
+            </section>
           </div>
         </div>
-        <section class="panel speaking-history-panel">
-          <div class="panel-title"><div><span class="kicker">LOCAL HISTORY</span><h3>口语练习记录</h3></div><span id="speakingCount" class="count-pill">0</span></div>
-          <div id="speakingHistory" class="library-list empty-state">还没有口语练习记录</div>
-        </section>
       </section>
 
       <section class="page" data-page="language">
         <div class="page-intro panel compact-panel">
-          <div><span class="kicker">YOUR REUSABLE LANGUAGE</span><h2>个人语料库</h2><p>由你主动调用 AI，汇总当前本机已有和新增的答题记录。不会上传录音或题目图片；生成结果会永久写入本地数据文件。</p></div>
+          <div><span class="kicker">YOUR REUSABLE LANGUAGE</span><h2>个人语料库</h2><p>由你主动调用 AI，汇总当前本机已有和新增的答题记录。口语保留个人可迁移素材；写作按领域整理，并且每天只展示少量重点。</p></div>
           <button id="generateLanguageBank" class="button button-primary ai-required">生成 / 更新我的语料库</button>
         </div>
-        <div id="languageBankStatus" class="language-bank-status panel">
-          <div><strong>尚未生成</strong><span>完成一些口语或写作练习后，可按需汇总；系统不会每次练习都自动调用 AI。</span></div>
+        <div id="languageBankStatus" class="language-bank-status panel hidden" aria-live="polite"></div>
+        <div class="language-tabs" role="tablist" aria-label="语料库类型">
+          <button id="languageTabSpeaking" class="language-tab is-active" type="button" role="tab" aria-selected="true" data-language-tab="speaking"><span>口语语料</span><b id="languageTabSpeakingCount">0</b></button>
+          <button id="languageTabWriting" class="language-tab" type="button" role="tab" aria-selected="false" data-language-tab="writing"><span>写作语料</span><b id="languageTabWritingCount">0</b></button>
         </div>
-        <section class="language-bank-grid">
-          <div class="panel language-bank-column"><div class="panel-title"><div><span class="kicker">SPEAKING MATERIALS</span><h3>我的口语素材</h3></div></div><div id="speakingLanguageBank" class="language-bank-list empty-state">尚无个人口语素材</div></div>
-          <div class="panel language-bank-column"><div class="panel-title"><div><span class="kicker">WRITING LANGUAGE</span><h3>写作词组与句式</h3></div></div><div id="writingLanguageBank" class="language-bank-list empty-state">尚无写作语料</div></div>
+        <section class="panel language-workspace">
+          <aside id="languageBankMenu" class="language-bank-menu empty-state" aria-label="语料卡片目录">尚无个人口语素材</aside>
+          <article id="languageBankDetail" class="language-bank-detail empty-state" aria-live="polite">生成语料库后，在左侧选择一张卡片查看内容。</article>
         </section>
       </section>
 
@@ -260,20 +292,18 @@
         </div>
       </section>
       <section id="reviewWorkspace" class="page review-workspace" data-page="review" aria-labelledby="reviewWorkspaceTitle">
-        <header class="review-workspace-header"><div><span class="kicker">QUESTION REVIEW · 批改报告</span><h2 id="reviewWorkspaceTitle">本题批改</h2><p id="reviewWorkspaceMeta" class="privacy-hint"></p></div><div class="button-row"><button id="closeReviewWorkspace" class="button button-secondary">返回练习</button><button id="editReviewSource" class="button button-primary">编辑本题答案</button></div></header>
+        <header class="review-workspace-header"><div><span class="kicker">QUESTION REVIEW · 批改报告</span><h2 id="reviewWorkspaceTitle">本题批改</h2><p id="reviewWorkspaceMeta" class="privacy-hint"></p></div><div class="button-row"><button id="closeReviewWorkspace" class="button button-secondary">返回练习</button><button id="retryReviewSource" class="button button-primary">根据本次批改再练此题</button><button id="newReviewSource" class="button button-secondary">其他新题</button><button id="editReviewSource" class="hidden" aria-hidden="true">编辑本题答案</button></div></header>
         <p id="reviewWorkspaceNotice" class="privacy-hint"></p>
+        <section id="reviewQuestionPanel" class="panel review-question"><span class="kicker">ORIGINAL QUESTION</span><h3>题目 / 话题</h3><div class="review-question-content"><div id="reviewWorkspacePrompt" class="review-original"></div><div id="reviewWorkspaceImages" class="writing-prompt-images"></div></div><audio id="reviewWorkspaceAudio" class="audio-player hidden" controls></audio></section>
         <section id="reviewScorePanel" class="panel review-score-panel"><span class="kicker">SCORE AT A GLANCE</span><h3>评分与小分</h3><div id="reviewScoreSummary" class="markdown-body"></div></section>
         <section id="reviewOverviewPanel" class="panel review-overview-panel"><span class="kicker">OVERALL FEEDBACK</span><h3>总体评价</h3><div id="reviewOverviewSummary" class="markdown-body"></div></section>
-        <section class="panel review-question"><span class="kicker">ORIGINAL QUESTION</span><h3>题目 / 话题</h3><div id="reviewWorkspacePrompt" class="review-original"></div><div id="reviewWorkspaceImages" class="writing-prompt-images"></div><audio id="reviewWorkspaceAudio" class="audio-player hidden" controls></audio></section>
-        <nav id="reviewWorkspaceNavigation" class="review-section-navigation" aria-label="批改报告章节"></nav>
         <section id="reviewRawTranscriptPanel" class="panel review-source hidden"><span class="kicker">RAW TRANSCRIPT</span><h3>原始转写</h3><p class="privacy-hint">录音转写原样保留，仅展示，不在此处添加修改标注。</p><div id="reviewRawTranscript" class="review-original"></div></section>
         <section class="panel review-source"><div class="panel-title"><div><span class="kicker">YOUR ANSWER</span><h3 id="reviewAnnotatedTitle">原文与修改标注</h3></div><span id="reviewAnnotationCount" class="count-pill">0</span></div><div id="reviewPunctuationTools" class="hidden"><p id="punctuationStatus" class="privacy-hint"></p><button id="generatePunctuation" class="button button-secondary" type="button">AI 生成标点与大小写整理稿</button></div><p id="reviewAnnotationNotice" class="privacy-hint"></p><div id="reviewWorkspaceOriginal" class="review-original annotated-original"></div></section>
         <section id="reviewCorrectionsSection" class="panel"><span class="kicker">CORRECTIONS</span><h3>逐条修改</h3><div id="reviewCorrections" class="review-corrections"></div></section>
-        <section class="review-result"><h3>优化建议、范文与值得记忆的语料</h3><div id="reviewWorkspaceFeedback" class="ai-output review-report"></div></section>
+        <section class="review-result"><div id="reviewWorkspaceFeedback" class="ai-output review-report"></div></section>
       </section>
     </main>
   </div>
-  <button id="exitFocusMode" class="button button-primary exit-focus hidden" type="button">退出专注</button>
   <div id="storageOnboarding" class="onboarding-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="onboardingTitle">
     <section class="onboarding-card">
       <span class="kicker">FIRST START</span>
@@ -284,12 +314,16 @@
       <small class="onboarding-footnote">完成选择前不会显示路径，也不会把练习记录写入浏览器缓存。</small>
     </section>
   </div>
+  <div id="reviewImageLightbox" class="image-lightbox hidden" role="dialog" aria-modal="true" aria-label="全屏查看题目图片">
+    <button id="closeReviewImageLightbox" class="image-lightbox-close" type="button" aria-label="关闭全屏图片">×</button>
+    <img id="reviewImageLightboxImage" alt="放大的题目图片">
+  </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="vendor/marked.umd.js"></script>
   <script src="vendor/purify.min.js"></script>
-  <script src="markdown.js"></script>
+  <script src="markdown.js?v=20260909m"></script>
   <script src="review-annotations.js"></script>
   <script src="whisper.js"></script>
-  <script src="app.js"></script>
+  <script src="app.js?v=20260909o"></script>
 </body>
 </html>

@@ -35,10 +35,160 @@
     element.replaceChildren(fragment);
   };
 
+  const emphasizeOverallScore = root => {
+    const paragraph = root?.querySelector(".review-score-card > p:first-of-type");
+    if (!paragraph) return;
+    const text = paragraph.textContent.trim();
+    const match = text.match(/^(.{0,18}?(?:总分|Overall(?: Band)? Score))\s*[：:]\s*(\d(?:\.\d)?(?:\s*[–—-]\s*\d(?:\.\d)?)?)(.*)$/i);
+    if (!match) { paragraph.classList.add("score-lead-fallback"); return; }
+    const highlight = document.createElement("div");
+    highlight.className = "score-highlight";
+    const label = document.createElement("span");
+    label.textContent = "预估总分";
+    const score = document.createElement("strong");
+    score.textContent = match[2];
+    if (/[–—-]/.test(match[2])) highlight.classList.add("has-range");
+    highlight.append(label, score);
+    if (match[3].trim()) {
+      const note = document.createElement("small");
+      note.textContent = match[3].trim()
+        .replace(/^[（(]\s*/, "")
+        .replace(/\s*[）)](?=\s|$)/g, "")
+        .trim();
+      highlight.append(note);
+    }
+    paragraph.replaceWith(highlight);
+    const tableWrapper = root.querySelector(".review-score-card .markdown-table-scroll");
+    if (tableWrapper) {
+      const criterionName = raw => {
+        const text = String(raw || "").trim();
+        if (/\bTA\b|TASK\s+ACHIEVEMENT|任务完成/i.test(text)) return "Task Achievement";
+        if (/\bTR\b|TASK\s+RESPONSE|任务回应/i.test(text)) return "Task Response";
+        if (/\bCC\b|COHERENCE|衔接/i.test(text)) return "Coherence & Cohesion";
+        if (/\bLR\b|LEXICAL|词汇/i.test(text)) return "Lexical Resource";
+        if (/\bGRA\b|GRAMMAR|语法/i.test(text)) return "Grammar Range & Accuracy";
+        if (/\bFC\b|FLUENCY|流利/i.test(text)) return "Fluency & Coherence";
+        if (/\bP\b|PRONUNCIATION|发音/i.test(text)) return "Pronunciation";
+        return text;
+      };
+      const rows = [...tableWrapper.querySelectorAll("tbody tr")];
+      const criteria = document.createElement("div");
+      criteria.className = "score-criteria-grid";
+      for (const row of rows) {
+        const cells = [...row.querySelectorAll("th, td")].map(cell => cell.textContent.trim());
+        if (cells.length < 2) continue;
+        const criterion = document.createElement("article");
+        criterion.className = "score-criterion-card";
+        const header = document.createElement("header");
+        const name = document.createElement("strong");
+        name.textContent = criterionName(cells[0]);
+        const value = document.createElement("span");
+        const rawValue = cells[1];
+        const numericBand = rawValue.match(/\d(?:\.\d)?(?:\s*[–—-]\s*\d(?:\.\d)?)?/);
+        value.textContent = numericBand ? numericBand[0].replace(/\s+/g, "") : (rawValue || "暂无法评分");
+        if (!numericBand) value.className = "score-status";
+        header.append(name, value);
+        criterion.append(header);
+        const evidence = cells.slice(2).join(" ").trim();
+        if (evidence) {
+          const detail = document.createElement("p");
+          detail.textContent = evidence;
+          detail.title = evidence;
+          criterion.append(detail);
+        }
+        criteria.append(criterion);
+      }
+      if (criteria.childElementCount) tableWrapper.replaceWith(criteria);
+      const overview = document.createElement("div");
+      overview.className = "score-overview-grid";
+      highlight.replaceWith(overview);
+      overview.append(highlight, criteria.childElementCount ? criteria : tableWrapper);
+    }
+  };
+
+  const reportSectionKicker = heading => {
+    const text = String(heading || "").trim();
+    if (/确定语法错误/.test(text)) return "CONFIRMED CORRECTIONS";
+    if (/逐[句条].*(?:纠错|修改|修正)/.test(text)) return "CORRECTIONS";
+    if (/原文优化建议/.test(text)) return "IMPROVEMENT SUGGESTIONS";
+    if (/目标水平范文/.test(text)) return "TARGET-LEVEL MODEL";
+    if (/最终值得记忆的语料/.test(text)) return "REUSABLE LANGUAGE";
+    if (/转写整理稿/.test(text)) return "TRANSCRIPT EDIT";
+    return "REVIEW SECTION";
+  };
+
+  const memoryGroupFromText = value => /句式|句型|框架|sentence|pattern|frame/i.test(String(value || "")) ? "patterns" : "collocations";
+
+  const splitMemoryExpression = value => {
+    const text = String(value || "").trim().replace(/^[“”"']+|[“”"']+$/g, "");
+    const separated = text.match(/^(.*?)(?:\s*[｜|]\s*|\s+[—–-]\s+)([^]*[\u3400-\u9fff][^]*)$/);
+    return separated
+      ? { expression: separated[1].trim().replace(/^[“”"']+|[“”"']+$/g, ""), detail: separated[2].trim() }
+      : { expression: text, detail: "" };
+  };
+
+  const normalizeReusableLanguageCard = card => {
+    const heading = card.querySelector("h3");
+    if (!heading || !/最终值得记忆的语料/.test(heading.textContent)) return;
+    const entries = { collocations: [], patterns: [] };
+    let group = "collocations";
+    for (const node of [...card.children]) {
+      if (node === heading || node.classList.contains("kicker")) continue;
+      if (/^(H4|H5|H6|P)$/.test(node.nodeName)) group = memoryGroupFromText(node.textContent);
+      const table = node.matches("table") ? node : node.querySelector("table");
+      if (table) {
+        for (const row of table.querySelectorAll("tbody tr")) {
+          const cells = [...row.querySelectorAll("th, td")].map(cell => cell.textContent.trim());
+          if (!cells[0]) continue;
+          const target = memoryGroupFromText(cells[1]);
+          entries[target].push({ expression: cells[0], detail: cells[2] || cells[1] || "" });
+        }
+      }
+      if (/^(UL|OL)$/.test(node.nodeName)) {
+        for (const item of node.querySelectorAll(":scope > li")) entries[group].push(splitMemoryExpression(item.textContent));
+      }
+    }
+    if (!entries.collocations.length && !entries.patterns.length) return;
+    [...card.children].filter(node => node !== heading && !node.classList.contains("kicker")).forEach(node => node.remove());
+    const groups = document.createElement("div");
+    groups.className = "review-memory-groups";
+    for (const [key, english, chinese] of [["collocations", "CORE COLLOCATIONS", "核心搭配"], ["patterns", "USEFUL SENTENCE PATTERNS", "实用句式"]]) {
+      if (!entries[key].length) continue;
+      const seen = new Set();
+      const section = document.createElement("section");
+      const label = document.createElement("span");
+      label.className = "review-memory-label";
+      label.textContent = english;
+      const title = document.createElement("h4");
+      title.textContent = chinese;
+      const list = document.createElement("ul");
+      for (const entry of entries[key]) {
+        const expression = String(entry.expression || "").trim();
+        const identity = expression.toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, "");
+        if (!identity || seen.has(identity)) continue;
+        seen.add(identity);
+        const item = document.createElement("li");
+        const phrase = document.createElement("strong");
+        phrase.textContent = expression;
+        item.append(phrase);
+        if (entry.detail) {
+          const detail = document.createElement("span");
+          detail.textContent = entry.detail;
+          item.append(detail);
+        }
+        list.append(item);
+      }
+      section.append(label, title, list);
+      groups.append(section);
+    }
+    card.append(groups);
+  };
+
   // Presentation only: stored Markdown remains unchanged.
   window.renderReviewReport = (element, source, navigation, options = {}) => {
     window.renderReviewMarkdown(element, source);
-    navigation.replaceChildren();
+    navigation?.replaceChildren();
+    if (navigation) navigation.hidden = true;
     const extracted = {
       score: options.scoreElement || null,
       overview: options.overviewElement || null
@@ -84,21 +234,18 @@
       }
       if (isHeading) {
         card.id = destination === "report" ? `review-report-section-${++index}` : `review-${destination}-summary`;
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "button button-quiet";
-        button.textContent = node.textContent;
-        button.addEventListener("click", () => cardById(button.dataset.section)?.scrollIntoView({ behavior: "smooth", block: "start" }));
-        button.dataset.section = card.id;
-        navigation.append(button);
         if (destination !== "report") continue;
+        const kicker = document.createElement("span");
+        kicker.className = "kicker";
+        kicker.textContent = reportSectionKicker(node.textContent);
+        card.append(kicker);
       }
       card.append(node);
     }
     element.replaceChildren(fragment);
+    element.querySelectorAll(".review-report-card").forEach(normalizeReusableLanguageCard);
     if (extracted.score && !extractedCounts.score) extracted.score.innerHTML = '<p class="review-extracted-placeholder">本次模型没有返回可识别的总分与小分，请重新生成报告。</p>';
     if (extracted.overview && !extractedCounts.overview) extracted.overview.innerHTML = '<p class="review-extracted-placeholder">本次模型没有返回独立的总体评价，请结合下方报告查看。</p>';
-    navigation.hidden = !index;
+    if (extracted.score && extractedCounts.score) emphasizeOverallScore(extracted.score);
   };
-  const cardById = id => document.getElementById(id);
 })();
