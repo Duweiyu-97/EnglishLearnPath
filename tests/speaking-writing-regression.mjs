@@ -218,7 +218,7 @@ try {
   await h.api.generateLanguageBank();
   assert.equal(h.chatRequests.at(-1).output_contract, 'personal-language-bank-json-v1');
   assert.equal(h.api.state.languageBank.speaking[0].title, 'Cycling');
-  assert.equal(h.api.state.languageBank.writing[0].domain, 'education');
+  assert.equal(h.api.state.languageBank.writing[0].domain, '教育');
   assert.match(h.api.state.languageBank.writing[0].collocations[0], /｜平等的机会/);
   assert.match(h.chatRequests.at(-1).messages[0].content, /中文翻译/);
   const translationUpgrade = harness({ writings: [], speaking: [], languageBank: { summary:'Legacy', speaking:[], writing:[{domain:'education',collocations:['equal access'],sentencePatterns:[]}], sourceKeys:[] } });
