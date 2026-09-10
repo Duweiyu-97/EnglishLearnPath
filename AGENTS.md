@@ -9,6 +9,10 @@ When the user corrects an implementation or workflow, fix the current issue and 
 ## Learned Rules
 
 <!-- New reusable rules are appended below this line. Do not edit above this section. -->
+[UI] Correction reviews use compact vertical comparisons with aligned actions; notebook review controls stay in a small toolbar, with one practice action per note and no repeated status prose or nested card shells.
+[UI] Notebook composers must show every field and save control without panel scrolling; size the adjacent library to the form and scroll only library content, keeping its title and filters visible. Stacked layouts use a separately bounded library.
+[ARCH] Collect writing and speaking mistakes individually from reviewed, source-matched corrections; practice the saved original before revealing its reference correction and schedule reviews by self-assessed performance, without whole-answer imports or mandatory new scenarios.
+[UI] Pausing a writing practice timer must make the answer read-only until timing resumes, with a visible pause notice and the draft preserved.
 [UI] A single recording workflow must produce synchronized audio and transcript with one capture control and one durable save operation; history must restore both outputs.
 [UI] Changing a task type must update its dependent default settings; loading a saved record must preserve that record's explicit settings.
 [WORKFLOW] Verify the user's running copy and visible page after fixing a local app; changes only present in a development or candidate package do not fix an older running copy. Preserve unsaved work before refreshing.
@@ -33,7 +37,7 @@ When the user corrects an implementation or workflow, fix the current issue and 
 [WORKFLOW] Writing and speaking practice records autosave after meaningful edits and after transcription; do not require a separate save button before review or navigation.
 [ARCH] Writing prompt images must be sent to a vision-capable model as real image inputs; never silently reduce an image-based Task 1 review to text-only guessing.
 [WORKFLOW] Windows release packages must include a visible stop-service executable that can end leftover launcher processes before users delete or replace an extracted version.
-[CODE] Every AI feature must use a provider-neutral output contract and validate or normalize the response before inserting it into fixed web UI regions.
+[CODE] Normalize AI output into fixed provider-neutral schemas and silently discard unrecognized fields or items instead of stringifying or rendering malformed content — prevents provider response drift from breaking the UI.
 [UI] All writing Task 1 or Task 2 and speaking reports use the same core section order and card shell: original question, score and subscores, overall feedback, answer and annotations, exact corrections, optional improvements, model answer, and reusable language; only media-specific evidence may differ.
 [UI] IELTS speaking practice must send the full question and explicit Part to AI; Part 2 runs a one-minute unrecorded preparation countdown followed by a two-minute recorded answer.
 [UI] Timed writing may use a distraction-free mode with collapsible global navigation and simultaneous access to prompt, timer, and answer area; speaking practice must remain in its normal recording-and-transcript layout without a focus mode.
@@ -71,3 +75,4 @@ When the user corrects an implementation or workflow, fix the current issue and 
 [UI] The personal language-bank page must not display accumulated AI summary prose or source-count metadata as a permanent card; lead directly into the speaking and writing material tabs, reserving status UI for active work or errors.
 [UI] Speaking expressions and answer frames use the same bilingual hierarchy as writing language: English on the primary line and its concise Chinese translation below, including normalized legacy entries.
 [WORKFLOW] Keep the README screenshot gallery to one or two representative, polished product views; remove obsolete or anomalous screenshots instead of documenting every page.
+[WORKFLOW] A user-triggered AI action may automatically retry one provider-format failure; never require repeated clicks, and never overwrite saved data until a fully validated response succeeds.

@@ -117,6 +117,18 @@
     return "REVIEW SECTION";
   };
 
+  const reportSectionKind = heading => {
+    const text = String(heading || "").trim();
+    if (/(?:评分与小分|分项评分|综合评分|预估总分)/.test(text)) return "score";
+    if (/(?:总体评价|总体表现|整体评价|一句话总体)/.test(text)) return "overview";
+    if (/(?:逐[句条].*(?:纠错|修改|修正)|确定语法错误)/.test(text)) return "corrections";
+    if (/转写整理稿/.test(text)) return "transcript";
+    if (/(?:原文|可选).*(?:优化|提升).*建议|优化建议/.test(text)) return "improvement";
+    if (/(?:目标水平|参考|示范).*(?:范文|版本)|范文/.test(text)) return "model";
+    if (/(?:最终)?值得记忆的语料|可复用语料/.test(text)) return "language";
+    return "";
+  };
+
   const memoryGroupFromText = value => /句式|句型|框架|sentence|pattern|frame/i.test(String(value || "")) ? "patterns" : "collocations";
 
   const splitMemoryExpression = value => {
@@ -205,15 +217,16 @@
     let destination = "report";
     const extractedCounts = { score: 0, overview: 0 };
     for (const node of nodes) {
-      const isHeading = level && node.nodeName === `H${level}`;
+      const isHeading = options.strictSections ? /^H[1-3]$/.test(node.nodeName) : level && node.nodeName === `H${level}`;
       if (isHeading) {
         seenHeading = true;
-        skipCorrection = Boolean((options.dedupeCorrections && /(?:逐[句条].*(?:纠错|修改|修正)|确定语法错误)/.test(node.textContent)) || (options.hideTranscript && /转写整理稿/.test(node.textContent)));
+        const kind = reportSectionKind(node.textContent);
+        skipCorrection = Boolean((options.dedupeCorrections && kind === "corrections") || (options.hideTranscript && kind === "transcript") || (options.strictSections && !kind));
         if (skipCorrection) { card = null; continue; }
-        destination = /(?:评分与小分|分项评分|综合评分|预估总分)/.test(node.textContent) ? "score"
-          : /(?:总体评价|总体表现|整体评价|一句话总体)/.test(node.textContent) ? "overview" : "report";
+        destination = kind === "score" ? "score" : kind === "overview" ? "overview" : "report";
       }
       if (skipCorrection) continue;
+      if (options.strictSections && !seenHeading) continue;
       if (!seenHeading && node.nodeName === 'P') {
         const preamble = node.textContent.trim();
         if (/^主题[：:]/.test(preamble)) continue;

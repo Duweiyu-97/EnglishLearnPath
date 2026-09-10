@@ -166,9 +166,30 @@ const server = http.createServer(async (req, res) => {
     assert.equal(strictWriting.count,1,'writing annotations must exclude optional style improvements');
     assert.equal(strictWriting.marks,1);
     assert.doesNotMatch(strictWriting.text,/beneficial/);
+    const repeatedMechanical = await page.evaluate(() => {
+      const original = 'Wi-fi reliability matters. Later, wi-fi reliability is discussed again. Results were high - a clear contrast.';
+      const markdown = '### 确定语法错误\n\n| 原文 | 修改 | 类型 | 原因 |\n|---|---|---|---|\n| wi-fi reliability | Wi-Fi reliability | 拼写/大小写 | Wi-Fi 是专有缩写。 |\n| high - a clear contrast | high — a clear contrast | 标点 | 英文破折号应使用 em dash。 |';
+      const result = window.renderReviewAnnotations({original,markdown,definiteOnly:true,originalElement:document.querySelector('#reviewWorkspaceOriginal'),correctionsElement:document.querySelector('#reviewCorrections'),countElement:document.querySelector('#reviewAnnotationCount'),noticeElement:document.querySelector('#reviewAnnotationNotice')});
+      return {count:result.count,marks:[...document.querySelectorAll('.annotation-mark')].map(node=>node.textContent),cards:document.querySelectorAll('.correction-card').length,buttons:document.querySelectorAll('.correction-return').length,text:document.querySelector('#reviewCorrections').textContent,notice:document.querySelector('#reviewAnnotationNotice').textContent};
+    });
+    assert.equal(repeatedMechanical.count,1,'typographic dash preferences must not become confirmed grammar errors');
+    assert.deepEqual(repeatedMechanical.marks,['Wi-fi reliability','wi-fi reliability'],'safe repeated spelling and capitalization corrections mark every occurrence');
+    assert.equal(repeatedMechanical.cards,1);
+    assert.equal(repeatedMechanical.buttons,1,'one correction card keeps one return control even when several occurrences are marked');
+    assert.doesNotMatch(repeatedMechanical.text,/em dash|破折号/);
+    assert.match(repeatedMechanical.notice,/已定位 1 \/ 1/);
+    const emptyCorrectionReport = await page.evaluate(() => {
+      const source = '模型额外添加的前言，不应显示。\n\n## 模型随意增加的章节\n\n这段无法识别，不应显示。\n\n### 确定语法错误\n\n没有。\n\n### 原文优化建议\n\n可以补充例证。';
+      const result = window.renderReviewAnnotations({original:'No definite errors.',markdown:source,definiteOnly:true,originalElement:document.querySelector('#reviewWorkspaceOriginal'),correctionsElement:document.querySelector('#reviewCorrections'),countElement:document.querySelector('#reviewAnnotationCount'),noticeElement:document.querySelector('#reviewAnnotationNotice')});
+      window.renderReviewReport(document.querySelector('#reviewWorkspaceFeedback'),source,null,{dedupeCorrections:true,strictSections:true});
+      return {count:result.count,report:document.querySelector('#reviewWorkspaceFeedback').textContent,headings:[...document.querySelectorAll('#reviewWorkspaceFeedback h3')].map(node=>node.textContent)};
+    });
+    assert.equal(emptyCorrectionReport.count,0);
+    assert.doesNotMatch(emptyCorrectionReport.report,/额外添加|确定语法错误|没有。|随意增加|无法识别/,'preamble, empty corrections and unknown AI sections must not create report cards');
+    assert.deepEqual(emptyCorrectionReport.headings,['原文优化建议']);
     assert.equal(await page.locator('.review-workspace-header').evaluate(el=>getComputedStyle(el).position),'static');
     await page.evaluate(()=>window.scrollTo(0,0));
-    await page.screenshot({path:path.join(root,'docs/images/question-review.png'),fullPage:false});
+    await page.screenshot({path:path.join(process.env.TEMP || root,'elp-question-review.png'),fullPage:false});
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.locator('#reviewWorkspace').evaluate(el=>el.scrollWidth<=el.clientWidth+1),true,'page must fit narrow screens');
     await page.locator('#closeReviewWorkspace').click();

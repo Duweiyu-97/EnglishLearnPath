@@ -21,7 +21,7 @@
     }
     return parts.join('\n\n').trim();
   };
-  function locate(original, quote, punctuationOnly) {
+  function locateAll(original, quote, punctuationOnly, allowRepeated = false) {
     let haystack = original, needle = quote, positions, ends;
     if (punctuationOnly) {
       positions = [];
@@ -53,19 +53,36 @@
       ends = normalized.ends;
       needle = typography(quote).text;
     }
-    if (!needle) return null;
-    const start = haystack.indexOf(needle);
-    if (start < 0 || haystack.indexOf(needle, start + 1) >= 0) return null;
-    const end = start + needle.length;
-    if (!positions) return {start, end};
-    const mapped = {start:positions[start], end:ends ? ends[end - 1] : positions[end - 1] + 1};
-    // Never match a quoted word inside another word.
-    if (punctuationOnly && (/[\p{L}\p{N}]/u.test(original[mapped.start - 1] || '') || /[\p{L}\p{N}]/u.test(original[mapped.end] || ''))) return null;
-    return mapped;
+    if (allowRepeated) {
+      haystack = haystack.toLocaleLowerCase();
+      needle = needle.toLocaleLowerCase();
+    }
+    if (!needle) return [];
+    const found = [];
+    for (let start = haystack.indexOf(needle); start >= 0; start = haystack.indexOf(needle, start + Math.max(1, needle.length))) {
+      const end = start + needle.length;
+      const mapped = !positions ? {start, end} : {start:positions[start], end:ends ? ends[end - 1] : positions[end - 1] + 1};
+      // Never match a quoted word inside another word.
+      const startsInsideWord = /[\p{L}\p{N}]/u.test(original[mapped.start - 1] || '') && /[\p{L}\p{N}]/u.test(original[mapped.start] || '');
+      const endsInsideWord = /[\p{L}\p{N}]/u.test(original[mapped.end - 1] || '') && /[\p{L}\p{N}]/u.test(original[mapped.end] || '');
+      if (!startsInsideWord && !endsInsideWord) found.push(mapped);
+    }
+    return found.length > 1 && !allowRepeated ? [] : found;
   }
 
   const definiteWritingError = type => /(?:语法|拼写|词形|主谓一致|时态|冠词|单复数|介词|句法|标点|grammar|spelling|agreement|tense|article|plural|preposition|syntax|punctuation)/i.test(String(type || ""))
     && !/(?:优化|更自然|更地道|高级|简洁|衔接|结构|论证|风格|表达建议|style|optional|polish)/i.test(String(type || ""));
+
+  const optionalTypographyRevision = item => {
+    const description = `${item?.type || ""} ${item?.explanation || ""}`;
+    return window.isPunctuationOnlyRevision(item?.original, item?.corrected)
+      && /(?:标点|punctuation|破折号|连字符|em\s*dash|en\s*dash|hyphen)/i.test(description)
+      && /\s-\s/.test(item.original)
+      && /(?:[—–]|,)/.test(item.corrected);
+  };
+
+  const repeatSafeWritingRevision = item => window.isPunctuationOnlyRevision(item?.original, item?.corrected)
+    && /(?:拼写|大小写|专有名词|spelling|capitali[sz]ation)/i.test(String(item?.type || ""));
 
   function extract(markdown, definiteOnly = false) {
     const root = document.createElement("div");
@@ -102,30 +119,83 @@
       else if (pending && reasonLabel.test(label)) pending.explanation = value;
     });
     add(pending);
-    return (definiteOnly ? results.filter(item => definiteWritingError(item.type)) : results).slice(0, 100);
+    return (definiteOnly ? results.filter(item => definiteWritingError(item.type) && !optionalTypographyRevision(item)) : results).slice(0, 100);
   }
 
-  window.renderReviewAnnotations = ({ original, markdown, originalElement, correctionsElement, countElement, noticeElement, punctuationOnly = false, definiteOnly = false }) => {
+  window.renderReviewAnnotations = ({ original, markdown, originalElement, correctionsElement, countElement, noticeElement, punctuationOnly = false, definiteOnly = false, notebookOriginal = original, onSaveCorrection, isCorrectionSaved = () => false }) => {
     const corrections = extract(markdown, definiteOnly);
     originalElement.replaceChildren();
     correctionsElement.replaceChildren();
     const ranges = [];
     corrections.forEach((item, index) => {
-      const location = locate(original, item.original, punctuationOnly);
-      const start = location?.start ?? -1, end = location?.end ?? -1;
-      // Ambiguous, missing or overlapping quotes stay in the list only.
-      const matched = location && !ranges.some(range => start < range.end && end > range.start);
-      if (matched) ranges.push({ start, end, item, index });
+      const locations = locateAll(original, item.original, punctuationOnly, definiteOnly && repeatSafeWritingRevision(item));
+      const accepted = locations.filter(location => !ranges.some(range => location.start < range.end && location.end > range.start));
+      accepted.forEach((location, occurrence) => ranges.push({ ...location, item, index, occurrence, markId:`review-original-${index}${occurrence ? `-${occurrence}` : ""}` }));
+      const matched = accepted.length > 0;
       const card = document.createElement("article");
       card.className = "correction-card";
       card.id = `review-correction-${index}`;
       card.tabIndex = -1;
       const heading = document.createElement("h4"); heading.textContent = `${index + 1}. ${item.type || "修改建议"}`;
+      const header = document.createElement("header"); header.className = "correction-heading";
+      const actions = document.createElement("div"); actions.className = "correction-actions";
+      header.append(heading, actions);
       const before = document.createElement("p"); before.className = "correction-before"; before.textContent = item.original;
       const after = document.createElement("p"); after.className = "correction-after"; after.textContent = item.corrected;
-      const reason = document.createElement("p"); reason.textContent = item.explanation || "详细说明见下方完整报告。";
-      const status = document.createElement("small"); status.textContent = matched ? "已在原文中标注" : "未自动定位：原文不完全一致、重复出现或与其他标注重叠";
-      card.append(heading, before, after, reason, status);
+      const comparison = document.createElement("div"); comparison.className = "correction-comparison";
+      [["原句", before], ["修改", after]].forEach(([label, paragraph]) => {
+        const column = document.createElement("div");
+        const caption = document.createElement("span"); caption.className = "correction-label"; caption.textContent = label;
+        column.append(caption, paragraph); comparison.append(column);
+      });
+      const reason = document.createElement("p"); reason.className = "correction-reason"; reason.textContent = item.explanation || "";
+      const status = document.createElement("small"); status.className = "correction-location";
+      status.textContent = matched ? "" : "暂未定位原文";
+      status.title = "原文不完全一致、重复出现或与其他标注重叠";
+      card.append(header, comparison, reason, status);
+      const canSave = typeof onSaveCorrection === "function" && definiteWritingError(item.type) && !optionalTypographyRevision(item)
+        && locateAll(notebookOriginal, item.original, punctuationOnly, repeatSafeWritingRevision(item)).length > 0;
+      if (canSave) {
+        const saveButton = document.createElement("button");
+        saveButton.type = "button";
+        saveButton.className = "button button-secondary correction-save";
+        saveButton.disabled = isCorrectionSaved(item);
+        saveButton.textContent = saveButton.disabled ? "已加入错题本" : "加入错题本";
+        const saveStatus = document.createElement("small");
+        saveStatus.className = "correction-save-status";
+        saveStatus.setAttribute("role", "status");
+        saveButton.addEventListener("click", async () => {
+          saveButton.disabled = true;
+          saveButton.textContent = "正在保存…";
+          saveStatus.textContent = "";
+          try {
+            await onSaveCorrection({ ...item });
+            saveButton.textContent = "已加入错题本";
+          } catch {
+            saveButton.disabled = false;
+            saveButton.textContent = "重试加入错题本";
+            saveStatus.textContent = "保存失败，请检查本地数据服务后重试。";
+          }
+        });
+        actions.append(saveButton);
+        card.append(saveStatus);
+      }
+      if (matched) {
+        const returnButton = document.createElement("button");
+        returnButton.type = "button";
+        returnButton.className = "button button-quiet correction-return";
+        returnButton.textContent = accepted.length > 1 ? `返回原文（${accepted.length} 处）` : "返回原文";
+        returnButton.setAttribute("aria-controls", `review-original-${index}`);
+        returnButton.addEventListener("click", () => {
+          const mark = document.getElementById(`review-original-${index}`);
+          if (!mark) return;
+          originalElement.querySelectorAll(".is-returned").forEach(node => node.classList.remove("is-returned"));
+          mark.classList.add("is-returned");
+          mark.focus({preventScroll:true});
+          mark.scrollIntoView({behavior:"smooth",block:"center"});
+        });
+        actions.prepend(returnButton);
+      }
       correctionsElement.append(card);
     });
     let cursor = 0;
@@ -133,25 +203,13 @@
       originalElement.append(document.createTextNode(original.slice(cursor, range.start)));
       const mark = document.createElement("mark");
       mark.className = "annotation-mark";
-      mark.id = `review-original-${range.index}`;
+      mark.id = range.markId;
       mark.textContent = original.slice(range.start, range.end);
       mark.tabIndex = 0;
       mark.setAttribute("role", "button");
       mark.setAttribute("aria-label", `查看修改 ${range.index + 1}：${range.item.original}`);
       mark.title = `建议：${range.item.corrected}`;
       const card = document.getElementById(`review-correction-${range.index}`);
-      const returnButton = document.createElement("button");
-      returnButton.type = "button";
-      returnButton.className = "button button-quiet correction-return";
-      returnButton.textContent = "返回原文";
-      returnButton.setAttribute("aria-controls", mark.id);
-      returnButton.addEventListener("click", () => {
-        originalElement.querySelectorAll(".is-returned").forEach(node => node.classList.remove("is-returned"));
-        mark.classList.add("is-returned");
-        mark.focus({preventScroll:true});
-        mark.scrollIntoView({behavior:"smooth",block:"center"});
-      });
-      card.append(returnButton);
       const select = () => {
         correctionsElement.querySelectorAll(".is-selected").forEach(card => card.classList.remove("is-selected"));
         card.classList.add("is-selected");
@@ -164,8 +222,9 @@
       cursor = range.end;
     });
     originalElement.append(document.createTextNode(original.slice(cursor)));
-    countElement.textContent = String(ranges.length);
-    noticeElement.textContent = corrections.length ? (definiteOnly ? `已定位 ${ranges.length} / ${corrections.length} 条确定语法错误。点击标红原文查看最小修改；可选优化只在报告中展示，不会标红。` : `已定位 ${ranges.length} / ${corrections.length} 条 AI 修改。点击标红原文查看建议。`) : (definiteOnly ? "没有可定位的确定语法错误。可选优化仍可在下方报告中查看，原文不会因此标红。" : "尚无可定位的逐句修改，原文保持完整。已有评价仍可在下方查看。");
+    const locatedCorrections = new Set(ranges.map(range => range.index)).size;
+    countElement.textContent = String(locatedCorrections);
+    noticeElement.textContent = corrections.length ? (definiteOnly ? `已定位 ${locatedCorrections} / ${corrections.length} 条确定语法错误。点击标红原文查看最小修改；可选优化只在报告中展示，不会标红。` : `已定位 ${locatedCorrections} / ${corrections.length} 条 AI 修改。点击标红原文查看建议。`) : (definiteOnly ? "没有可定位的确定语法错误。可选优化仍可在下方报告中查看，原文不会因此标红。" : "尚无可定位的逐句修改，原文保持完整。已有评价仍可在下方查看。");
     if (!corrections.length) correctionsElement.textContent = definiteOnly ? "这份报告没有可识别的确定语法错误；页面不会把风格优化标成错误。" : "这份报告没有可识别的“原文—修改”条目。页面不会自行编造错误。";
     return { count: corrections.length };
   };

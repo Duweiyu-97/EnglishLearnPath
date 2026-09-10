@@ -6,7 +6,7 @@
   <meta name="theme-color" content="#16352f">
   <meta name="description" content="English Learning Path：本地优先、可自行导入材料的英语学习中心。">
   <title>English Learning Path · 英语学习路径</title>
-  <link rel="stylesheet" href="styles.css?v=20260909l">
+  <link rel="stylesheet" href="styles.css?v=20260910d">
 </head>
 <body>
   <div class="app-shell">
@@ -126,7 +126,7 @@
                 <article class="writing-workspace-card writing-question-card"><header><span>QUESTION</span><button id="writingFocusMode" class="button button-quiet focus-entry">专注答题</button></header><div id="writingSessionQuestion" class="writing-session-question"></div></article>
                 <article class="writing-workspace-card writing-answer-card"><header><div><span>YOUR RESPONSE</span><small id="writingAnswerHint">建议至少 250 英文词（数字与标点不计）</small></div><div><strong id="wordCount">0</strong> 英文词</div></header><textarea id="writingEssay" placeholder="Start writing here..." spellcheck="true"></textarea></article>
               </div>
-              <div class="writing-session-footer"><span id="saveStatus">内容会自动保存到本机</span><div class="button-row writing-actions"><button id="reviewWriting" class="button button-primary ai-required">AI 写作反馈</button><button id="addWritingMistake" class="button button-quiet">记录本题复盘</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div></div>
+              <div class="writing-session-footer"><span id="saveStatus">内容会自动保存到本机</span><div class="button-row writing-actions"><button id="reviewWriting" class="button button-primary ai-required">AI 写作反馈</button><button id="deleteWriting" class="button button-danger-quiet hidden">删除记录</button></div></div>
               <div id="writingReview" class="ai-output hidden"></div>
             </section>
           </div>
@@ -144,7 +144,7 @@
           <div class="speaking-main">
             <section id="speakingOverviewView" class="practice-overview panel">
               <header class="practice-overview-hero"><div><span class="kicker">SPEAKING ROOM</span><h2>今天的口语重点</h2><p>先热身和回忆表达；需要练习时，再从左侧新建一次录音。</p></div></header>
-              <section class="daily-speaking-language" aria-labelledby="dailySpeakingLanguageTitle"><header><div><span class="kicker">OPTIONAL FLUENCY BOOST</span><h3 id="dailySpeakingLanguageTitle">今天可以主动带入</h3></div><p>只作建议，不强制使用；每天从已保存的通用表达中轮换。</p></header><div id="dailySpeakingLanguage" class="daily-language-cards"></div></section>
+              <section class="daily-speaking-language" aria-labelledby="dailySpeakingLanguageTitle"><header><div><span class="kicker">OPTIONAL FLUENCY BOOST</span><h3 id="dailySpeakingLanguageTitle">今天可以主动带入</h3></div><p>只作建议，不强制使用；每天仅从已保存的口语表达与答题骨架中轮换。</p></header><div id="dailySpeakingLanguage" class="daily-language-cards"></div></section>
               <section class="overview-plan"><header><span class="kicker">TODAY'S PLAN</span><h3>今日口语安排</h3></header><div id="speakingOverviewPlan" class="overview-plan-list"></div></section>
             </section>
             <section id="speakingPracticeView" class="speaking-practice-view hidden">
@@ -169,7 +169,7 @@
                 <div class="button-row transcription-actions"><button id="retryLocalTranscription" type="button" class="button button-secondary">重新转写本次录音</button><button id="cancelLocalTranscription" type="button" class="button button-quiet hidden">取消转写</button></div>
                 <textarea id="speakingTranscript" class="transcript-area" placeholder="录音结束后会自动显示本地 Whisper 识别结果。请回听核对，也可以手动修改或补充。"></textarea>
                 <p id="speakingSaveStatus" class="autosave-status">录音、文字稿与修改会自动保存到本机</p>
-                <div class="button-row speaking-actions"><button id="reviewSpeaking" class="button button-primary ai-required">AI 评价与修改</button><button id="addSpeakingMistake" class="button button-quiet">记录本题复盘</button><button id="deleteSpeaking" class="button button-danger-quiet hidden">删除记录</button></div>
+                <div class="button-row speaking-actions"><button id="reviewSpeaking" class="button button-primary ai-required">AI 评价与修改</button><button id="deleteSpeaking" class="button button-danger-quiet hidden">删除记录</button></div>
                 <p class="privacy-hint">AI 批改会使用学习计划中已保存的现有水平、目标水平和重点；未填写的项目会明确标为未提供。</p>
                 <div id="speakingReview" class="ai-output hidden"></div>
               </div>
@@ -245,7 +245,36 @@
           <section class="panel mistake-library">
             <div class="panel-title"><div><span class="kicker">LOCAL NOTEBOOK</span><h3>错题复盘与单词本</h3></div><span id="mistakeCount" class="count-pill">0</span></div>
             <div class="mistake-filters"><button class="button button-secondary is-active" data-mistake-filter="all">全部</button><button class="button button-quiet" data-mistake-filter="writing">写作</button><button class="button button-quiet" data-mistake-filter="speaking">口语</button><button class="button button-quiet" data-mistake-filter="vocabulary">单词本</button></div>
+            <div class="mistake-library-scroll" tabindex="0" role="region" aria-label="错题与单词内容，可滚动查看">
+            <section id="correctionStudy" class="vocabulary-study hidden" aria-label="自主纠错复习">
+              <div class="study-toolbar"><p id="correctionStudySummary" class="vocabulary-summary"></p>
+              <div class="button-row"><button id="startCorrectionStudy" type="button" class="button button-primary">开始复习</button><button id="stopCorrectionStudy" type="button" class="button button-quiet hidden">结束本轮</button></div></div>
+              <div id="correctionStudyCard" class="vocabulary-study-card hidden">
+                <p id="correctionStudyProgress" aria-live="polite"></p>
+                <p id="correctionStudySource" class="vocabulary-summary"></p>
+                <h4>原句</h4><p id="correctionStudyOriginal" class="correction-practice-original"></p>
+                <label class="field"><span>你的修改</span><textarea id="correctionStudyAttempt" rows="4" placeholder="先自己尝试改正，再查看参考修改。"></textarea></label>
+                <button id="revealCorrectionAnswer" type="button" class="button button-secondary">对照参考修改</button>
+                <div id="correctionStudyAnswer" class="hidden"><h4>参考修改</h4><p id="correctionStudyReference"></p><p id="correctionStudyReason"></p><p class="vocabulary-summary">表达不必完全相同，请按实际表现选择。</p></div>
+                <div id="correctionStudyRating" class="button-row hidden"><button type="button" class="button button-secondary" data-correction-rating="again" title="本轮再练">仍不会</button><button type="button" class="button button-secondary" data-correction-rating="hard" title="明天复习">需要提示</button><button type="button" class="button button-primary" data-correction-rating="good">独立改对</button></div>
+              </div>
+              <p id="correctionStudyStatus" role="status"></p>
+            </section>
             <div id="mistakeList" class="mistake-list empty-state">还没有错题或复盘记录</div>
+            <section id="vocabularyStudy" class="vocabulary-study hidden" aria-label="单词记忆练习">
+              <div class="study-toolbar"><p id="vocabularyStudySummary" class="vocabulary-summary"></p>
+              <div class="button-row"><button id="startVocabularyStudy" type="button" class="button button-primary">开始背词</button><button id="stopVocabularyStudy" type="button" class="button button-quiet hidden">结束本轮</button></div></div>
+              <div id="vocabularyStudyCard" class="vocabulary-study-card hidden">
+                <p id="vocabularyStudyProgress" aria-live="polite"></p>
+                <h3 id="vocabularyStudyWord"></h3>
+                <p class="vocabulary-recall-hint">先回忆释义和用法，再查看答案。</p>
+                <div id="vocabularyStudyAnswer" class="hidden"></div>
+                <button id="revealVocabularyAnswer" type="button" class="button button-secondary">显示释义与例句</button>
+                <div id="vocabularyStudyRating" class="button-row hidden"><button id="vocabularyAgain" type="button" class="button button-secondary">再练一次</button><button id="vocabularyKnown" type="button" class="button button-primary">记住了</button></div>
+              </div>
+              <p id="vocabularyStudyStatus" role="status"></p>
+            </section>
+            </div>
           </section>
         </div>
       </section>
@@ -314,16 +343,16 @@
       <small class="onboarding-footnote">完成选择前不会显示路径，也不会把练习记录写入浏览器缓存。</small>
     </section>
   </div>
-  <div id="reviewImageLightbox" class="image-lightbox hidden" role="dialog" aria-modal="true" aria-label="全屏查看题目图片">
+  <div id="reviewImageLightbox" class="image-lightbox hidden" role="dialog" aria-modal="true" aria-label="放大查看图片">
     <button id="closeReviewImageLightbox" class="image-lightbox-close" type="button" aria-label="关闭全屏图片">×</button>
     <img id="reviewImageLightboxImage" alt="放大的题目图片">
   </div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <script src="vendor/marked.umd.js"></script>
   <script src="vendor/purify.min.js"></script>
-  <script src="markdown.js?v=20260909m"></script>
-  <script src="review-annotations.js"></script>
+  <script src="markdown.js?v=20260910b"></script>
+  <script src="review-annotations.js?v=20260910c"></script>
   <script src="whisper.js"></script>
-  <script src="app.js?v=20260909o"></script>
+  <script src="app.js?v=20260910f"></script>
 </body>
 </html>

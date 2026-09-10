@@ -7,17 +7,30 @@ const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 let bound = true;
 let data = { writings: [], speaking: [], mistakes: [] };
+let planAttempts = 0;
+let failNotebookSave = false;
 const server = http.createServer(async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (req.url.startsWith('/api/')) {
     res.setHeader('Content-Type', 'application/json');
     if (req.url === '/api/data') {
       if (req.method === 'PUT') {
+        if (failNotebookSave) { res.statusCode = 503; res.end(JSON.stringify({error:'Synthetic disk unavailable'})); return; }
         let body = ''; for await (const chunk of req) body += chunk;
         data = JSON.parse(body).data;
       }
       res.end(JSON.stringify({ data, storage: { bound, ready: bound, fileExists: false } }));
-    } else if (req.url === '/api/ai/status') res.end(JSON.stringify({ connected: false }));
+    } else if (req.url === '/api/ai/status') res.end(JSON.stringify({ connected: true, model: 'synthetic-deepseek' }));
+    else if (req.url === '/api/ai/chat' && req.method === 'POST') {
+      let body = ''; for await (const chunk of req) body += chunk;
+      const request = JSON.parse(body);
+      if (request.output_contract !== 'study-plan-json-v1') { res.statusCode = 400; res.end(JSON.stringify({error:'unexpected synthetic contract'})); return; }
+      planAttempts += 1;
+      if (planAttempts === 1) { res.statusCode = 502; res.end(JSON.stringify({error:'模型服务暂时不可用'})); return; }
+      const day = {writing:1,speaking:1,writingReview:1,writingRewrite:1,speakingReview:1,languageMinutes:15,reviewMinutes:30,note:'synthetic day'};
+      const phases = ['重点强化','冲刺与调整'].map(name => ({name,focus:'synthetic focus',days:Array.from({length:7},()=>({...day}))}));
+      res.end(JSON.stringify({content:JSON.stringify({summary:'synthetic retried plan',priorities:['review'],phases})}));
+    }
     else { res.statusCode = 404; res.end('{}'); }
     return;
   }
@@ -51,16 +64,16 @@ const server = http.createServer(async (req, res) => {
     await page.locator('#sidebarCollapse').click();
     await page.locator('.nav-item[data-route="language"]').click();
     assert.match(await page.locator('#generateLanguageBank').textContent(), /生成.*更新.*语料库/);
-    assert.match(await page.locator('#languageBankStatus').textContent(), /不会每次练习都自动调用 AI/);
+    assert.equal(await page.locator('#languageBankStatus').isVisible(), false, 'idle language generation status must not occupy a permanent card');
     data.languageBank = {
       summary:'Synthetic reusable language', generatedAt:'2026-09-09T08:00:00Z', sourceCounts:{speaking:2,writing:1},
       speaking:[
-        {title:'Cycling with friends',personalCore:'I cycle with close friends on weekends.',reusableTopics:['hobbies','friends'],expressions:['clear my mind','stay connected'],answerFrames:['answer → reason → example']},
-        {title:'A familiar park',personalCore:'The park near my home is quiet.',reusableTopics:['places'],expressions:['within walking distance'],answerFrames:['identify → describe → explain']}
+        {title:'Cycling with friends',personalCore:'I cycle with close friends on weekends.',reusableTopics:['hobbies','friends'],expressions:['clear my mind｜放松头脑','stay connected｜保持联系'],answerFrames:['I enjoy..., because...｜回答后说明原因']},
+        {title:'A familiar park',personalCore:'The park near my home is quiet.',reusableTopics:['places'],expressions:['within walking distance｜步行可达'],answerFrames:['I would describe it as...｜描述这个地方']}
       ],
       writing:[
         {domain:'Education',collocations:['increase earning potential｜提高收入潜力','reduce crime rates｜降低犯罪率','drive technological progress｜推动科技进步','equal access to education｜平等接受教育的机会','practical skills｜实用技能','lifelong learning｜终身学习'],sentencePatterns:['It is important to ensure that...｜确保……十分重要','Education can play a central role in...｜教育可以在……中发挥核心作用','This investment enables people to...｜这项投入使人们能够……','A fourth pattern should rotate.｜第四个句式用于轮换']},
-        {domain:'General linking',collocations:['however｜然而','such as｜例如','more importantly｜更重要的是','as a result｜因此','in contrast｜相比之下','for instance｜例如'],sentencePatterns:['While this view is understandable, ...｜尽管这种观点可以理解，……','A more important consideration is that...｜更重要的考虑是……','This is particularly evident when...｜这一点在……时尤为明显','A fourth general pattern should rotate.｜第四个通用句式用于轮换']}
+        {domain:'General linking',collocations:[{english:'however',translation:'然而'},{unexpected:{nested:true}},'such as｜例如','more importantly｜更重要的是','as a result｜因此','in contrast｜相比之下','for instance｜例如'],sentencePatterns:['While this view is understandable, ...｜尽管这种观点可以理解，……','A more important consideration is that...｜更重要的考虑是……','This is particularly evident when...｜这一点在……时尤为明显','A fourth general pattern should rotate.｜第四个通用句式用于轮换']}
       ]
     };
     await page.reload();
@@ -77,8 +90,10 @@ const server = http.createServer(async (req, res) => {
     await page.locator('[data-language-index="1"]').click();
     assert.equal(await page.locator('#languageBankDetail > h3').textContent(),'通用表达');
     assert.equal(await page.locator('.language-bank-detail').count(),1,'only the selected language card may be expanded');
+    assert.match(await page.locator('#languageBankDetail').textContent(),/however.*然而/s,'known object-shaped language is normalized');
+    assert.doesNotMatch(await page.locator('#languageBankDetail').textContent(),/\[object Object\]|unexpected|nested/,'unknown object-shaped language is discarded');
     await page.locator('.nav-item[data-route="home"]').click();
-    await page.screenshot({path:path.join(root, 'docs/images/home.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-home.png'), fullPage:true, animations:'disabled'});
     data.writings = [
       {id:'task-one',type:'Task 1 Academic',minutes:20,prompt:'Describe a chart.',essay:'A chart response.',review:'Reviewed',status:'completed',updatedAt:'2026-09-08T10:00:00Z'},
       {id:'task-two',type:'Task 2',minutes:40,prompt:'Discuss public transport.',essay:'An essay response.',status:'completed',updatedAt:'2026-09-09T10:00:00Z'}
@@ -107,7 +122,7 @@ const server = http.createServer(async (req, res) => {
     await page.locator('[data-writing-type="Task 1 Academic"]').click();
     assert.equal(await page.locator('#writingMinutes').inputValue(), '20');
     assert.equal(await page.locator('#writingTimer').textContent(), '20:00');
-    await page.screenshot({path:path.join(root, 'docs/images/writing.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-writing.png'), fullPage:true, animations:'disabled'});
     await page.locator('[data-writing-type="Task 2"]').click();
     assert.equal(await page.locator('#writingMinutes').inputValue(), '40');
     await page.locator('#writingPrompt').fill('Discuss whether public transport should be free.');
@@ -119,6 +134,16 @@ const server = http.createServer(async (req, res) => {
     await page.locator('#writingEssay').fill("One, two! 2026 7.5 don't well-known.");
     assert.equal(await page.locator('#wordCount').textContent(), '4', 'letters count as words while numbers and punctuation do not');
     await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-writing-session.png'), fullPage:true, animations:'disabled'});
+    await page.locator('#toggleTimer').click();
+    assert.equal(await page.locator('#writingEssay').evaluate(node => node.readOnly), true, 'pausing locks answer editing');
+    const pausedAnswer = await page.locator('#writingEssay').inputValue();
+    await page.locator('#writingEssay').focus();
+    await page.keyboard.type('Must not be inserted while paused');
+    assert.equal(await page.locator('#writingEssay').inputValue(), pausedAnswer);
+    assert.match(await page.locator('#writingAnswerHint').textContent(), /已暂停/);
+    await page.locator('#toggleTimer').click();
+    assert.equal(await page.locator('#writingEssay').evaluate(node => node.readOnly), false, 'resuming unlocks the original answer');
+    assert.equal(await page.locator('#writingEssay').inputValue(), pausedAnswer);
     await page.locator('#toggleTimer').click();
     assert.equal(await page.locator('body').getAttribute('class'), 'practice-focus');
     assert.equal(await page.locator('#writingFocusMode').isVisible(), false, 'focus entry must disappear after focus mode starts');
@@ -137,6 +162,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.locator('#speakingPracticeView').isVisible(), false, 'speaking recorder opens only after New Practice');
     assert.equal(await page.locator('#dailySpeakingLanguage article').count(), 3, 'speaking overview offers three optional fluency expressions');
     assert.equal(await page.locator('#dailySpeakingLanguage .daily-language-translation').count(), 3, 'shared fluency expressions retain Chinese translations');
+    assert.doesNotMatch(await page.locator('#dailySpeakingLanguage').textContent(),/however|highest rating|dissatisfaction rate|account for/i,'speaking overview must never source writing language');
     assert.equal(await page.locator('#saveSpeaking').count(), 0);
     assert.equal(await page.locator('#browserTranscribe').count(), 0);
     assert.equal(await page.locator('#transcriptionEngine').count(), 0);
@@ -164,14 +190,16 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.locator('#recordButton').textContent(), '开始 1 分钟准备');
     assert.match(await page.locator('#speakingPartGuide').textContent(), /准备 1 分钟.*2 分钟/);
     await page.locator('#speakingPart').selectOption('p1');
-    await page.screenshot({path:path.join(root, 'docs/images/speaking.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-speaking.png'), fullPage:true, animations:'disabled'});
     await page.locator('.nav-item[data-route="plan"]').click();
     assert.equal(await page.locator('#manualListening, #manualReading').count(), 0);
     assert.equal(await page.locator('.manual-targets input').count(), 7);
     assert.equal(await page.locator('#manualWriting').getAttribute('max'), '1');
     assert.equal(await page.locator('#manualSpeaking').getAttribute('max'), '2');
     assert.equal(await page.locator('.plan-layout').evaluate(node => getComputedStyle(node).gridTemplateColumns.split(' ').length),1,'plan editor and result must stack vertically');
-    await page.locator('#planExamDate').fill('2026-09-30');
+    const exam = new Date(); exam.setDate(exam.getDate() + 20);
+    const examDate = `${exam.getFullYear()}-${String(exam.getMonth() + 1).padStart(2,'0')}-${String(exam.getDate()).padStart(2,'0')}`;
+    await page.locator('#planExamDate').fill(examDate);
     await page.locator('#planCurrentLevel').fill('写作 6.0，口语 5.5');
     await page.locator('#planTargetLevel').fill('写作 7.0，口语 6.5');
     await page.locator('#manualWriting').fill('1');
@@ -183,7 +211,14 @@ const server = http.createServer(async (req, res) => {
     await page.locator('#manualReview').fill('25');
     await page.locator('#saveManualPlan').click();
     assert.deepEqual(await page.locator('.manual-plan-values span').allTextContents(), ['新写作 1 篇','新口语 2 次','写作精改 1 次','重写 0 篇','口语回听 1 次','语料记忆 12 分钟','错题与单词 25 分钟']);
-    await page.screenshot({path:path.join(root, 'docs/images/plan.png'), fullPage:true, animations:'disabled'});
+    await page.locator('#generateAiPlan').click();
+    await page.waitForFunction(() => document.querySelector('#planResult').textContent.includes('AI 已生成覆盖'));
+    assert.equal(planAttempts,2,'one plan action retries one transient DeepSeek response automatically');
+    assert.equal(data.studyPlan.source,'ai');
+    assert.equal(data.studyPlan.summary,'synthetic retried plan');
+    await page.locator('#saveManualPlan').click();
+    assert.equal(data.studyPlan.source,'manual','manual fixture is restored for the remaining plan interaction checks');
+    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-plan.png'), fullPage:true, animations:'disabled'});
     await page.locator('.nav-item[data-route="writing"]').click();
     const writingPlanCheck = page.locator('#writingOverviewPlan [data-overview-plan-check]').first();
     await writingPlanCheck.check();
@@ -196,7 +231,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.locator('#todayPlanSummary .today-module-summary').count(), 2, 'home shows only writing and speaking completion summaries');
     assert.deepEqual(await page.locator('#todayPlanSummary .today-module-summary strong').allTextContents(), ['1/2','1/3'], 'module completion clicks update the home summary');
     assert.equal(await page.locator('#todayPlanDetails').getAttribute('open'), null, 'task details stay collapsed by default');
-    await page.screenshot({path:path.join(root, 'docs/images/home.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-home-with-plan.png'), fullPage:true, animations:'disabled'});
     await page.locator('.nav-item[data-route="mistakes"]').click();
     assert.equal(await page.locator('select#mistakeModule').count(), 0);
     assert.deepEqual(await page.locator('[data-mistake-module]').evaluateAll(buttons => buttons.map(b => b.dataset.mistakeModule)), ['writing','speaking','vocabulary']);
@@ -209,25 +244,99 @@ const server = http.createServer(async (req, res) => {
       assert.equal((data.mistakes || []).length, before, 'category buttons must not submit the form');
       await page.locator('#mistakeTitle').fill('UI test');
       await page.locator('#mistakeText').fill('Synthetic note');
+      await page.locator('#mistakeImageInput').setInputFiles({name:'note.png',mimeType:'image/png',buffer:Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=','base64')});
+      await page.locator('#mistakeImagePreview .notebook-image-preview').click();
+      assert.equal(await page.locator('#reviewImageLightbox').isVisible(), true);
+      assert.equal((data.mistakes || []).length, before, 'preview must not submit the notebook form');
+      await page.keyboard.press('Escape');
       await page.locator('#mistakeForm button[type="submit"]').click();
       await page.waitForFunction(count => document.querySelector('#mistakeCount').textContent === String(count), before + 1);
       assert.equal(data.mistakes.at(-1).module, module);
+      await page.locator('#mistakeList .notebook-image-preview').first().focus();
+      await page.keyboard.press('Enter');
+      assert.equal(await page.locator('#reviewImageLightbox').isVisible(), true);
+      assert.equal(await page.locator('#reviewImageLightboxImage').getAttribute('src'), data.mistakes.at(-1).images[0]);
+      await page.locator('#closeReviewImageLightbox').click();
+      assert.equal(await page.locator('#reviewImageLightbox').isVisible(), false);
     }
+    await page.locator('[data-mistake-filter="vocabulary"]').click();
+    assert.equal(await page.locator('#vocabularyStudy').isVisible(), true);
+    await page.locator('#startVocabularyStudy').click();
+    assert.equal(await page.locator('#mistakeList').isVisible(), false, 'hide saved definitions during recall');
+    assert.equal(await page.locator('#vocabularyStudyAnswer').isVisible(), false);
+    assert.equal(await page.locator('#vocabularyStudyRating').isVisible(), false);
+    await page.locator('#revealVocabularyAnswer').click();
+    assert.match(await page.locator('#vocabularyStudyAnswer').textContent(), /Synthetic note/);
+    await page.locator('#vocabularyStudyAnswer .notebook-image-preview').click();
+    assert.equal(await page.locator('#reviewImageLightbox').isVisible(), true);
+    await page.keyboard.press('Escape');
+    failNotebookSave = true;
+    await page.locator('#vocabularyKnown').click();
+    await page.waitForFunction(() => document.querySelector('#vocabularyStudyStatus').textContent.includes('保存失败'));
+    assert.equal(data.mistakes.find(item => item.module === 'vocabulary').vocabularyReview, undefined);
+    assert.equal(await page.locator('#vocabularyStudyAnswer').isVisible(), true, 'failed save keeps the revealed card for retry');
+    failNotebookSave = false;
+    await page.locator('#vocabularyAgain').click();
+    await page.locator('#vocabularyStudyAnswer').waitFor({state:'hidden'});
+    assert.equal(data.mistakes.find(item => item.module === 'vocabulary').vocabularyReview.level, 0);
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({width,height:1050});
+      assert.equal(await page.locator('#vocabularyStudy').evaluate(el => el.scrollWidth <= el.clientWidth + 1), true);
+    }
+    await page.setViewportSize({width:1440,height:1050});
+    await page.locator('#revealVocabularyAnswer').click();
+    await page.screenshot({path:path.join(process.env.TEMP || root,'elp-vocabulary-study.png'),fullPage:true,animations:'disabled'});
+    await page.locator('#vocabularyKnown').click();
+    await page.waitForFunction(() => document.querySelector('#vocabularyStudyStatus').textContent.includes('本轮完成'));
+    const learned = data.mistakes.find(item => item.module === 'vocabulary').vocabularyReview;
+    assert.equal(learned.level, 1);
+    assert.ok(learned.dueDate > learned.lastReviewedDate);
+    assert.equal(await page.locator('#startVocabularyStudy').isDisabled(), true);
+    await page.reload();
+    await page.locator('[data-mistake-filter="vocabulary"]').click();
+    assert.equal(await page.locator('#startVocabularyStudy').isDisabled(), true, 'persisted next-review date survives reload');
+    assert.match(await page.locator('#vocabularyStudySummary').textContent(), /今日已练 1/);
+    await page.locator('#mistakeList .notebook-image-preview').first().click();
+    assert.equal(await page.locator('#reviewImageLightbox').isVisible(), true, 'saved notebook images still zoom after reload');
+    await page.keyboard.press('Escape');
     for (const width of [1440, 780, 390]) {
       await page.setViewportSize({width, height:1050});
       const card = page.locator('.mistake-entry').first();
-      const box = await card.boundingBox();
-      const button = await card.locator('[data-delete-mistake]').boundingBox();
+      const {box, button} = await card.evaluate(node => ({box:node.getBoundingClientRect().toJSON(),button:node.querySelector('[data-delete-mistake]').getBoundingClientRect().toJSON()}));
       assert.ok(button.height <= 32 && button.width <= 50, 'notebook delete must remain compact');
       assert.ok(button.x > box.x && button.x + button.width < box.x + box.width, 'delete stays inside card');
       assert.ok(button.y >= box.y && button.y - box.y < 24, 'delete stays at top-right');
     }
     await page.screenshot({path:path.join(root, 'dist/notebook-delete-check.png'), fullPage:true, animations:'disabled'});
     await page.setViewportSize({width:1440,height:1050});
+    await page.locator('[data-mistake-filter="all"]').click();
+    await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
+    const shortPageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+    data.mistakes.push(...Array.from({length:40}, (_, index) => ({id:`long-note-${index}`,module:'writing',title:`Practice ${index}`,text:'Review the original answer and explain the correction.\n'.repeat(12),createdAt:'2026-09-10T10:00:00Z'})));
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector('#mistakeCount').textContent === '43');
+    await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
+    assert.ok(await page.evaluate(() => document.documentElement.scrollHeight) <= shortPageHeight, 'adding notebook records must not extend the page');
+    for (const width of [1440,780,390]) {
+      await page.setViewportSize({width,height:1050});
+      const layout = await page.evaluate(() => {
+        const composer = document.querySelector('.mistake-composer');
+        const library = document.querySelector('.mistake-library');
+        const scroll = document.querySelector('.mistake-library-scroll');
+        scroll.scrollTop = scroll.scrollHeight;
+        return {left:composer.getBoundingClientRect().height,right:library.getBoundingClientRect().height,scrolls:scroll.scrollHeight>scroll.clientHeight,reachedEnd:Math.abs(scroll.scrollTop+scroll.clientHeight-scroll.scrollHeight)<2,fits:scroll.scrollWidth<=scroll.clientWidth+1};
+      });
+      if (width > 1100) assert.equal(layout.left, layout.right, 'library follows the full composer height on desktop');
+      assert.equal(await page.locator('.mistake-composer').evaluate(el => el.scrollHeight <= el.clientHeight + 1), true, 'all composer fields and save controls fit without panel scrolling');
+      assert.ok(layout.scrolls && layout.reachedEnd && layout.fits, 'long notes remain accessible with internal vertical scrolling');
+    }
+    await page.setViewportSize({width:1440,height:1050});
+    await page.evaluate(() => { document.querySelector('.mistake-library-scroll').scrollTop=0; window.scrollTo(0,0); });
+    await page.screenshot({path:path.join(process.env.TEMP || root,'elp-notebook-scroll.png'),fullPage:true,animations:'disabled'});
     bound = false;
     await page.reload();
     await page.locator('#storageOnboarding').waitFor({state:'visible'});
-    await page.screenshot({path:path.join(root, 'docs/images/storage.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-storage.png'), fullPage:true, animations:'disabled'});
     assert.deepEqual(errors, []);
     console.log('UI regression passed; refreshed screenshots contain no user records or paths.');
   } finally { await browser.close(); server.close(); }
