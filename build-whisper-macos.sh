@@ -59,7 +59,7 @@ engine_architectures="$(lipo -archs "$engine_source")"
 for required_architecture in arm64 x86_64; do
   [[ " $engine_architectures " == *" $required_architecture "* ]] || { echo "whisper-cli is missing $required_architecture" >&2; exit 1; }
 done
-if otool -L "$engine_source" | tail -n +2 | awk '{print $1}' | grep -Ev '^(/usr/lib/|/System/Library/)' | grep -q .; then
+if otool -L "$engine_source" | awk '/^[[:space:]]/{print $1}' | grep -Ev '^(/usr/lib/|/System/Library/)' | grep -q .; then
   echo "whisper-cli has a non-system dynamic library dependency" >&2
   otool -L "$engine_source" >&2
   exit 1
