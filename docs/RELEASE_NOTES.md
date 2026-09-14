@@ -1,3 +1,11 @@
+# 下一版本 · macOS 通用版
+
+- 新增可双击运行的 `English Learning Path.app`，同一完整包原生支持 Apple Silicon 与 Intel Mac，最低系统版本为 macOS 12。
+- macOS 完整包内置通用架构的 whisper.cpp 与相同的 Whisper small.en 模型，口语录音仍只在本机离线转写。
+- 新增 macOS 原生文件夹选择、Finder 数据目录打开、钥匙串保护的 AI 凭据和 `结束学习中心.app`。
+- GitHub Actions 在独立 macOS runner 上运行 Go 测试、双架构检查、签名完整性检查、公开 JFK 样例的离线转写和打包后启动验证；原有 Windows x64 构建、DPAPI、目录选择器、停止工具与发布 ZIP 保持原样。
+- 社区构建目前没有 Apple Developer 证书和公证。首次运行请按住 Control 点击应用并选择“打开”；不要使用来源不明的二次打包版本。
+
 # v0.7.0 · 错句复习与单词记忆
 
 ## 本次更新

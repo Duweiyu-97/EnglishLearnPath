@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -60,7 +61,11 @@ func TestBundledWhisperPublicSample(t *testing.T) {
 	binary.LittleEndian.PutUint32(wav[40:], uint32(len(pcm)))
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	result, err := transcribeWAV(ctx, filepath.Join(bundle, "whisper-cli.exe"), filepath.Join(bundle, "ggml-small.en.bin"), wav)
+	engineName := "whisper-cli"
+	if runtime.GOOS == "windows" {
+		engineName += ".exe"
+	}
+	result, err := transcribeWAV(ctx, filepath.Join(bundle, engineName), filepath.Join(bundle, "ggml-small.en.bin"), wav)
 	if err != nil {
 		t.Fatal(err)
 	}

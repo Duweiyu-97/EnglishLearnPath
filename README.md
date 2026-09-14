@@ -4,7 +4,9 @@
 
 ## 普通使用者：下载即用
 
-> 当前正式版已聚焦写作与口语；请下载 Releases 页面标记为 Latest 的完整离线包。
+> 当前正式版已聚焦写作与口语；请下载 Releases 页面标记为 Latest、与自己系统相符的完整离线包。
+
+### Windows 10/11 x64
 
 1. 打开右侧 **Releases**；
 2. 下载最新的 `EnglishLearnPath-Windows-x64-Full-版本号.zip`；
@@ -13,13 +15,20 @@
 
 关闭浏览器标签页不等于结束本地服务。升级或删除旧版本前，请先在任意一个新版完整包中双击 `结束学习中心.exe`；它会结束所有仍在后台运行的 English Learning Path 启动器，但不会删除你选择的数据目录或学习记录。正常使用时也可以点击页面右上角“退出”。
 
-不需要安装 Node.js、Python、数据库或其他依赖。请不要只下载绿色的 “Code → Download ZIP”，那是开发者源码，不含已经编译好的启动器。
+### macOS 12 或更高版本（Intel 与 Apple Silicon）
+
+1. 下载最新的 `EnglishLearnPath-macOS-Universal-Full-版本号.zip` 并完整解压；
+2. 双击 `English Learning Path.app`，程序会在默认浏览器中打开；
+3. 第一次运行若被 macOS 拦截，请按住 Control 点击应用、选择“打开”，再在确认框中选择“打开”。这是因为社区构建暂未使用付费 Apple Developer 证书签名和公证；
+4. 关闭浏览器标签页不等于结束本地服务。正常使用时可点击页面右上角“退出”，也可双击同一目录中的 `结束学习中心.app`。
+
+macOS 通用包同时包含 Intel (`x86_64`) 与 Apple Silicon (`arm64`) 原生程序，不需要 Rosetta。Windows 与 macOS 完整包都不需要安装 Node.js、Python、数据库或其他运行时。请不要只下载绿色的 “Code → Download ZIP”，那是开发者源码，不含已经编译好的启动器和 Whisper 模型。
 
 第一次启动时，页面会先要求你**选择或创建一个永久数据文件夹**。完成选择后才会建立并显示主数据文件；程序不会预先显示开发者电脑的路径，也不会退回浏览器缓存。如果选择的是以前用过且包含 `EnglishLearnPath-data.json` 的文件夹，历史记录会自动载入。
 
-每个解压目录都是相互隔离的便携副本。首次运行后，程序只在该副本旁创建 `runtime-data/config.json`，用于记住“这个副本绑定了哪个数据文件夹”；Release ZIP 和源码仓库均不包含该文件。同一台电脑重新下载并解压到新目录，也会从未绑定状态开始，不会读取另一个副本或开发环境的路径。学习记录始终写入你主动选择的数据文件夹。
+Windows 的每个解压目录都是相互隔离的便携副本。首次运行后，程序只在该副本旁创建 `runtime-data/config.json`，用于记住“这个副本绑定了哪个数据文件夹”；Release ZIP 和源码仓库均不包含该文件。同一台电脑重新下载并解压到新目录，也会从未绑定状态开始，不会读取另一个副本或开发环境的路径。macOS 则按系统惯例把这份小型绑定配置放在当前用户的 `~/Library/Application Support/EnglishLearnPath/`，因此把新版 `.app` 移到“应用程序”目录不会丢失绑定。两个系统的学习记录都始终写入你主动选择的数据文件夹。
 
-> 当前便携包优先支持 Windows 10/11 x64。首次运行时，Windows 可能显示来自未知发布者的安全提示，因为开源版本暂未购买代码签名证书。
+> Windows 版本继续支持 Windows 10/11 x64，现有便携目录、DPAPI 凭据和升级方式不变。首次运行时，Windows 可能显示来自未知发布者的安全提示，因为开源版本暂未购买代码签名证书。
 
 ## 功能
 
@@ -53,9 +62,9 @@
 
 只有 DeepSeek API Key 时，选择 **DeepSeek** 即可：当前官方基础地址为 `https://api.deepseek.com`，页面建议使用 `deepseek-v4-flash`。模型名称可能变化，请以 DeepSeek 官方文档为准。
 
-- 连接成功后，Key 和接口配置使用 Windows 当前账户加密，写入程序旁的 `runtime-data/ai-credentials.dpapi`；同一程序副本重启会自动恢复，不需再次输入。
-- Key 不写入浏览器缓存、学习数据 JSON、导出备份或发布包。“断开并删除已保存配置”会移除本机密钥文件；更换电脑、Windows 账户或丢失该文件后需重新输入。
-- 升级时保留自己的 `runtime-data` 目录，但不要把它上传或打包分享。加密不能防止已控制你 Windows 账户的恶意软件读取凭据。
+- 连接成功后，Windows 使用当前账户 DPAPI 加密并写入程序旁的 `runtime-data/ai-credentials.dpapi`；macOS 使用随机密钥进行 AES-GCM 加密，并把该随机密钥保存在当前用户“钥匙串”中。重启后会自动恢复，不需再次输入。
+- Key 不写入浏览器缓存、学习数据 JSON、导出备份或发布包。“断开并删除已保存配置”会移除本机加密配置；更换电脑、系统账户或丢失对应密文/钥匙串条目后需重新输入。
+- Windows 原地升级时保留自己的 `runtime-data` 目录；macOS 配置由系统 Application Support 目录保留。不要上传或分享这些配置。账户级加密不能防止已控制当前系统账户的恶意软件读取凭据。
 - DeepSeek V4 的连接测试与正式批改默认使用非思考模式，避免思考预算耗尽而没有最终答案；正式反馈上限为 6000 token。
 - 本地文字大模型需要使用者自行安装和启动；本地语音转写引擎和 small.en 模型已包含在 Full 完整包中，无需另外安装。
 - 连接测试会发送一条极短请求，云端 API 可能收取极少量费用。
@@ -74,7 +83,7 @@
 
 学习记录永久写入你绑定的本地文件夹。程序每次覆盖主数据前保留滚动备份，并按天保留一份备份；清除浏览器缓存或更换浏览器不会删除记录。换电脑时复制整个数据文件夹，再在新电脑上重新绑定即可。
 
-请只分享官方 Release ZIP 或从干净源码构建的 ZIP，不要把自己已经运行过的整个程序目录重新压缩分享；已运行副本的 `runtime-data/config.json` 会包含你选择的数据目录路径。删除这个小型配置目录只会重置文件夹绑定，不会删除绑定目录里的学习数据。
+请只分享官方 Release ZIP 或从干净源码构建的 ZIP，不要把自己已经运行过的整个程序目录重新压缩分享；Windows 已运行副本的 `runtime-data/config.json`、macOS Application Support 中的配置都会包含你选择的数据目录路径。删除相应的小型配置只会重置文件夹绑定，不会删除绑定目录里的学习数据。
 
 写作与口语都自动保存，不需要额外点击保存按钮：输入后会短暂防抖写盘；录音结束并完成 Whisper 转写后，音频与文字稿作为同一条记录自动写入本地数据文件，后续校对也会继续自动保存。刷新或重新启动后可从历史记录恢复，录音也可另行下载。单条音频最大 16 MB；音频不会发送给配置的文字 AI 接口。本地转写可取消或重试，失败时录音仍会保留。
 
@@ -86,7 +95,7 @@
 
 前端位于 `app/`，使用原生 HTML/CSS/JavaScript，无 npm 运行时依赖。`launcher/` 是仅使用 Go 标准库的本地启动器、本地文件存储和 AI 代理；完整包还会从 `launcher/cmd/stopper` 构建独立的后台服务结束工具。
 
-开发者运行源码需要 Go 1.22+；构建完整包还需 CMake 与 Visual Studio 2022 C++ 构建工具（GitHub Actions 已提供）：
+开发者运行源码需要 Go 1.22+；构建完整包还需 CMake，以及对应系统的 C/C++ 工具链（GitHub Actions 已提供）：
 
 ```powershell
 go run ./launcher
@@ -98,7 +107,14 @@ go run ./launcher
 ./build-portable.ps1 -Version dev
 ```
 
-推送 `v*` 标签后，GitHub Actions 会自动生成 Release ZIP。普通使用者无需这些开发依赖。
+在 macOS 上构建同时支持 Intel 与 Apple Silicon 的通用包：
+
+```bash
+chmod +x build-macos.sh build-whisper-macos.sh
+./build-macos.sh dev
+```
+
+每次 push 或 pull request 都会先完整验证并构建原有 Windows 包，再在独立的 macOS runner 上测试启动器、构建通用 `.app`、检查双架构 Whisper 和实际启动打包后的程序。推送 `v*` 标签后，两个系统的 ZIP 会自动加入同一个 GitHub Release。普通使用者无需这些开发依赖。
 
 ## 项目边界与免责声明
 

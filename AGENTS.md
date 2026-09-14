@@ -76,3 +76,4 @@ When the user corrects an implementation or workflow, fix the current issue and 
 [UI] Speaking expressions and answer frames use the same bilingual hierarchy as writing language: English on the primary line and its concise Chinese translation below, including normalized legacy entries.
 [WORKFLOW] Keep the README screenshot gallery to one or two representative, polished product views; remove obsolete or anomalous screenshots instead of documenting every page.
 [WORKFLOW] A user-triggered AI action may automatically retry one provider-format failure; never require repeated clicks, and never overwrite saved data until a fully validated response succeeds.
+[WORKFLOW] Cross-platform support must preserve the existing Windows launcher, DPAPI storage, Whisper build, package contents, and release behavior; isolate platform implementations and verify Windows separately.
