@@ -2,7 +2,7 @@ name: Build full offline packages
 
 on:
   push:
-    branches: [main]
+    branches: [main, codex/macos-universal-support]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
