@@ -58,15 +58,6 @@ jobs:
           path: dist/*.zip
           if-no-files-found: error
 
-      - name: Publish GitHub Release
-        if: github.ref_type == 'tag'
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $zip = Get-ChildItem -LiteralPath dist -Filter *.zip | Select-Object -First 1
-          gh release create "${{ github.ref_name }}" $zip.FullName --title "English Learning Path ${{ github.ref_name }} · 完整离线包" --notes-file docs/RELEASE_NOTES.md
-
   build-macos:
     name: Build macOS universal package
     needs: build
@@ -153,11 +144,34 @@ jobs:
           path: dist/EnglishLearnPath-macOS-Universal-Full-*.zip
           if-no-files-found: error
 
-      - name: Add macOS package to GitHub Release
-        if: github.ref_type == 'tag'
+  publish:
+    name: Publish verified Windows and macOS packages
+    if: github.ref_type == 'tag'
+    needs: [build, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout release notes
+        uses: actions/checkout@v4
+
+      - name: Download verified Windows package
+        uses: actions/download-artifact@v4
+        with:
+          name: EnglishLearnPath-Windows-x64-Full
+          path: release-assets/windows
+
+      - name: Download verified macOS package
+        uses: actions/download-artifact@v4
+        with:
+          name: EnglishLearnPath-macOS-Universal-Full
+          path: release-assets/macos
+
+      - name: Publish both packages together
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          zip_path="$(find dist -maxdepth 1 -name 'EnglishLearnPath-macOS-Universal-Full-*.zip' -print -quit)"
-          gh release upload "$GITHUB_REF_NAME" "$zip_path" --clobber
+          windows_zip="$(find release-assets/windows -maxdepth 1 -name 'EnglishLearnPath-Windows-x64-Full-*.zip' -print -quit)"
+          macos_zip="$(find release-assets/macos -maxdepth 1 -name 'EnglishLearnPath-macOS-Universal-Full-*.zip' -print -quit)"
+          test -n "$windows_zip"
+          test -n "$macos_zip"
+          gh release create "$GITHUB_REF_NAME" "$windows_zip" "$macos_zip" --title "English Learning Path $GITHUB_REF_NAME · Windows 与 macOS 完整离线包" --notes-file docs/RELEASE_NOTES.md
