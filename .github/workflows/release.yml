@@ -69,7 +69,6 @@ jobs:
 
   build-macos:
     name: Build macOS universal package
-    needs: build
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -103,7 +102,15 @@ jobs:
           chmod +x build-macos.sh build-whisper-macos.sh
           version="${GITHUB_SHA:0:7}"
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="$GITHUB_REF_NAME"; fi
-          ./build-macos.sh "$version"
+          set +e
+          ./build-macos.sh "$version" 2>&1 | tee macos-build.log
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if [[ $build_status -ne 0 ]]; then
+            last_error="$(tail -n 12 macos-build.log | tr '\r\n' '  ' | sed 's/%/%25/g')"
+            echo "::error title=macOS universal build failed::$last_error"
+            exit "$build_status"
+          fi
 
       - name: Verify packaged app starts and both architectures exist
         shell: bash
