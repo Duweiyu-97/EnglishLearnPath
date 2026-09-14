@@ -2,7 +2,7 @@ name: Build full offline packages
 
 on:
   push:
-    branches: [main, codex/macos-universal-support]
+    branches: [main]
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
@@ -69,6 +69,7 @@ jobs:
 
   build-macos:
     name: Build macOS universal package
+    needs: build
     runs-on: macos-15
     timeout-minutes: 45
     steps:
