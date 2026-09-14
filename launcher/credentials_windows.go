@@ -9,6 +9,8 @@ import (
 	"unsafe"
 )
 
+const credentialFilename = "ai-credentials.dpapi"
+
 type credentialBlob struct {
 	size uint32
 	data *byte

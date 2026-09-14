@@ -107,7 +107,7 @@ func main() {
 		writeStartupError(fmt.Errorf("无法初始化永久数据目录：%w", err))
 		return
 	}
-	settings.path = filepath.Join(filepath.Dir(disk.configPath), "ai-credentials.dpapi")
+	settings.path = filepath.Join(filepath.Dir(disk.configPath), credentialFilename)
 	settings.restore()
 
 	// Let Windows assign a free loopback port. A fixed port can make a newly
@@ -235,11 +235,17 @@ func handleDataOpenDirectory(w http.ResponseWriter, _ *http.Request) {
 		writeError(w, http.StatusPreconditionFailed, "请先选择或创建永久数据文件夹")
 		return
 	}
-	if runtime.GOOS != "windows" {
+	var command *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		command = exec.Command("explorer.exe", directory)
+	case "darwin":
+		command = exec.Command("open", directory)
+	default:
 		writeError(w, http.StatusNotImplemented, "当前系统暂不支持从程序打开文件夹")
 		return
 	}
-	if err := exec.Command("explorer.exe", directory).Start(); err != nil {
+	if err := command.Start(); err != nil {
 		writeError(w, http.StatusInternalServerError, "无法打开数据文件夹："+err.Error())
 		return
 	}
@@ -580,6 +586,12 @@ func newDiskStore() (*diskStore, error) {
 	var configRoot string
 	if override := strings.TrimSpace(os.Getenv("ENGLISH_LEARN_PATH_CONFIG_DIR")); override != "" {
 		configRoot = override
+	} else if runtime.GOOS == "darwin" {
+		userConfigRoot, err := os.UserConfigDir()
+		if err != nil {
+			return nil, fmt.Errorf("无法定位 macOS 应用配置目录：%w", err)
+		}
+		configRoot = filepath.Join(userConfigRoot, "EnglishLearnPath")
 	} else {
 		executable, err := os.Executable()
 		if err != nil {
@@ -842,7 +854,11 @@ func securityHeaders(next http.Handler) http.Handler {
 func findResourceDir(name string) (string, error) {
 	var candidates []string
 	if executable, err := os.Executable(); err == nil {
-		candidates = append(candidates, filepath.Join(filepath.Dir(executable), name))
+		executableDir := filepath.Dir(executable)
+		candidates = append(candidates, filepath.Join(executableDir, name))
+		if runtime.GOOS == "darwin" {
+			candidates = append(candidates, filepath.Join(executableDir, "..", "Resources", name))
+		}
 	}
 	if cwd, err := os.Getwd(); err == nil {
 		candidates = append(candidates, filepath.Join(cwd, name), filepath.Join(cwd, "..", name))

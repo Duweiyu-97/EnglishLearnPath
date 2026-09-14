@@ -58,7 +58,7 @@ func (s *configStore) restore() {
 	}
 	plain, err := unprotectCredential(encrypted)
 	if err != nil {
-		s.loadError = "无法解密已保存的配置；更换电脑或 Windows 账户后需要重新输入 Key"
+		s.loadError = "无法解密已保存的配置；更换电脑或系统账户后需要重新输入 Key"
 		return
 	}
 	defer clear(plain)

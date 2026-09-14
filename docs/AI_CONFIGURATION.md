@@ -30,10 +30,10 @@ English Learning Path 的基础功能不依赖 AI。写作反馈和口语文字�
 
 ## 隐私与 Key
 
-- API Key 使用 Windows 当前账户加密后保存在本机 `runtime-data/ai-credentials.dpapi`，同一副本重启自动恢复。留空并测试会复用同一接口地址已保存的 Key；换地址不会发送旧 Key。
+- API Key 不以明文保存。Windows 使用当前账户 DPAPI 加密后写入程序旁的 `runtime-data/ai-credentials.dpapi`；macOS 使用 AES-GCM 加密配置，并把随机加密密钥放入当前用户钥匙串，密文位于 `~/Library/Application Support/EnglishLearnPath/ai-credentials.secure`。重启后自动恢复。留空并测试会复用同一接口地址已保存的 Key；换地址不会发送旧 Key。
 - 服务商、接口地址和模型名称会写入绑定的本地数据文件，方便下次自动恢复；这些非敏感设置不会写进发布包。
 - Key 不会进入浏览器本地存储、备份文件或日志。
-- “断开并删除已保存配置”会删除加密文件。换电脑或 Windows 账户需重新输入；升级时保留私人 runtime-data 目录，分享时必须排除。
+- “断开并删除已保存配置”会删除加密文件。换电脑或系统账户需重新输入；Windows 升级时保留私人 `runtime-data` 目录，macOS 的配置由 Application Support 与钥匙串保留，分享时必须排除。
 - DeepSeek V4 的测试与批改请求默认关闭思考模式，避免仅返回思考内容；不会将思考内容当作最终答案展示。
 - 作文或口语文字稿会发送给你配置的服务商；发送前请阅读其隐私政策。
 - 口语录音不会由本项目发送给配置的文字 AI。
