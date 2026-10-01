@@ -30,19 +30,27 @@ jobs:
         shell: pwsh
         run: |
           node --check app/app.js
+          if ($LASTEXITCODE -ne 0) { throw 'App syntax check failed' }
           node --check app/whisper.js
+          if ($LASTEXITCODE -ne 0) { throw 'Whisper syntax check failed' }
           node tests/static-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Static smoke test failed' }
           node tests/macos-platform-smoke.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Platform smoke test failed' }
           node tests/speaking-writing-regression.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Practice regression test failed' }
 
       - name: Check launcher
         shell: pwsh
         run: |
           Get-ChildItem launcher -Filter *.go | ForEach-Object { gofmt -w $_.FullName }
           git diff --exit-code
+          if ($LASTEXITCODE -ne 0) { throw 'Go formatting check failed' }
           Push-Location launcher
           go test ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Launcher tests failed' }
           go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Go vet failed' }
           Pop-Location
 
       - name: Build portable package
@@ -50,6 +58,26 @@ jobs:
         run: |
           $version = if ("${{ github.ref_type }}" -eq "tag") { "${{ github.ref_name }}" } else { "${{ github.sha }}".Substring(0, 7) }
           ./build-portable.ps1 -Version $version
+
+      - name: Verify packaged Windows transcription including Unicode paths
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem dist -Filter 'EnglishLearnPath-Windows-x64-Full-*.zip' | Select-Object -First 1
+          if (!$zip) { throw 'Missing Windows package' }
+          $smokeRoot = Join-Path $env:RUNNER_TEMP 'english-learn-path-windows-smoke'
+          Expand-Archive -LiteralPath $zip.FullName -DestinationPath $smokeRoot
+          $engine = Get-ChildItem $smokeRoot -Recurse -Filter whisper-cli.exe | Select-Object -First 1
+          if (!$engine) { throw 'Missing packaged Whisper engine' }
+          $sourceRoot = Join-Path $env:RUNNER_TEMP 'english-learn-path-whisper-source'
+          Expand-Archive -LiteralPath (Join-Path $engine.DirectoryName 'whisper.cpp-source.zip') -DestinationPath $sourceRoot
+          $sample = Get-ChildItem $sourceRoot -Recurse -Filter jfk.wav | Select-Object -First 1
+          if (!$sample) { throw 'Missing public audio fixture' }
+          $env:ELP_WHISPER_BUNDLE = $engine.DirectoryName
+          $env:ELP_WHISPER_TEST_WAV = $sample.FullName
+          Push-Location launcher
+          go test -run TestBundledWhisperPublicSample -count=1 -v
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged Windows transcription failed' }
+          Pop-Location
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4

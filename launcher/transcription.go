@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -56,6 +57,9 @@ func transcribeWAV(ctx context.Context, engine, model string, data []byte) (stri
 	if err := validateTranscriptionWAV(data); err != nil {
 		return "", err
 	}
+	if runtime.GOOS == "windows" {
+		return transcribePipedWAV(ctx, engine, model, data)
+	}
 	scratch, err := os.MkdirTemp("", "elp-whisper-")
 	if err != nil {
 		return "", err
@@ -96,6 +100,55 @@ func transcribeWAV(ctx context.Context, engine, model string, data []byte) (stri
 		return "", fmt.Errorf("没有识别出清晰语音，请回听录音后重试")
 	}
 	return result, nil
+}
+
+// Windows argv uses the system code page, but Whisper interprets the model
+// argument as UTF-8. Use an ASCII model basename under a Unicode-safe working
+// directory, and pipes for audio/text so neither TEMP nor output paths enter argv.
+func transcribePipedWAV(ctx context.Context, engine, model string, data []byte) (string, error) {
+	engine, err := filepath.Abs(engine)
+	if err != nil {
+		return "", err
+	}
+	model, err = filepath.Abs(model)
+	if err != nil {
+		return "", err
+	}
+	threads := runtime.NumCPU() / 2
+	if threads < 1 {
+		threads = 1
+	}
+	if threads > 4 {
+		threads = 4
+	}
+	// A non-dash output basename keeps CLI segment callbacks enabled for stdin.
+	// No output format flag is set, so this does not create a transcript file.
+	command := exec.CommandContext(ctx, engine, "-m", filepath.Base(model), "-f", "-", "-of", "transcript", "-l", "en", "-t", fmt.Sprint(threads), "-nt", "-np")
+	command.Dir = filepath.Dir(model)
+	command.Stdin = bytes.NewReader(data)
+	output := &transcriptBuffer{}
+	command.Stdout, command.Stderr = output, io.Discard
+	hideTranscriptionWindow(command)
+	if err := command.Run(); err != nil {
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("本地转写已取消或超时，录音仍保留")
+		}
+		return "", fmt.Errorf("本地语音引擎运行失败（%v），录音仍保留，请确认完整包未损坏且内存充足", err)
+	}
+	result := strings.TrimSpace(output.buffer.String())
+	if result == "" {
+		return "", fmt.Errorf("没有识别出清晰语音，请回听录音后重试")
+	}
+	return result, nil
+}
+
+type transcriptBuffer struct{ buffer bytes.Buffer }
+
+func (b *transcriptBuffer) Write(p []byte) (int, error) {
+	if b.buffer.Len()+len(p) > 256*1024 {
+		return 0, fmt.Errorf("转写结果异常：超过长度限制")
+	}
+	return b.buffer.Write(p)
 }
 
 func handleTranscription(w http.ResponseWriter, r *http.Request) {

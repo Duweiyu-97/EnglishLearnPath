@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/binary"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -59,18 +60,83 @@ func TestBundledWhisperPublicSample(t *testing.T) {
 	wav := append(testWAV()[:44], pcm...)
 	binary.LittleEndian.PutUint32(wav[4:], uint32(len(wav)-8))
 	binary.LittleEndian.PutUint32(wav[40:], uint32(len(pcm)))
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-	defer cancel()
 	engineName := "whisper-cli"
 	if runtime.GOOS == "windows" {
 		engineName += ".exe"
 	}
-	result, err := transcribeWAV(ctx, filepath.Join(bundle, engineName), filepath.Join(bundle, "ggml-small.en.bin"), wav)
+	for _, name := range []string{"original", "unicode"} {
+		t.Run(name, func(t *testing.T) {
+			dir := bundle
+			if name == "unicode" {
+				dir = filepath.Join(t.TempDir(), "中文 空格 🎤")
+				if err := os.Mkdir(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				for _, file := range []string{engineName, "ggml-small.en.bin"} {
+					copyWhisperFixture(t, filepath.Join(bundle, file), filepath.Join(dir, file))
+				}
+				for _, key := range []string{"TMP", "TEMP", "TMPDIR"} {
+					t.Setenv(key, dir)
+				}
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			defer cancel()
+			result, err := transcribeWAV(ctx, filepath.Join(dir, engineName), filepath.Join(dir, "ggml-small.en.bin"), wav)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(strings.ToLower(result), "ask not what your country") {
+				t.Fatal("public fixture not recognized")
+			}
+			if strings.Contains(result, "-->") || strings.Contains(result, "whisper_") {
+				t.Fatal("transcript contains timestamps or engine logs")
+			}
+			if name == "unicode" {
+				files, err := os.ReadDir(dir)
+				if err != nil || len(files) != 2 {
+					t.Fatal("transcription left unexpected files in bundle")
+				}
+			}
+			canceled, stop := context.WithCancel(context.Background())
+			stop()
+			if _, err := transcribeWAV(canceled, filepath.Join(dir, engineName), filepath.Join(dir, "ggml-small.en.bin"), wav); err == nil || !strings.Contains(err.Error(), "取消") {
+				t.Fatal("cancellation was not reported")
+			}
+		})
+	}
+}
+
+func copyWhisperFixture(t *testing.T, source, target string) {
+	t.Helper()
+	in, err := os.Open(source)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.ToLower(result), "ask not what your country") {
-		t.Fatal("public fixture not recognized")
+	defer in.Close()
+	out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0700)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, copyErr := io.Copy(out, in)
+	closeErr := out.Close()
+	if copyErr != nil {
+		t.Fatal(copyErr)
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+}
+
+func TestTranscriptBufferLimit(t *testing.T) {
+	buffer := &transcriptBuffer{}
+	if _, err := io.Copy(buffer, strings.NewReader(strings.Repeat("a", 256*1024))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(buffer, strings.NewReader("x")); err == nil {
+		t.Fatal("accepted oversized transcript")
+	}
+	if buffer.buffer.Len() != 256*1024 {
+		t.Fatal("buffer exceeded limit")
 	}
 }
 func TestTranscriptionWAVValidation(t *testing.T) {
