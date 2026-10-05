@@ -94,6 +94,20 @@ function harness(initialState, localWhisper) {
 }
 
 try {
+  let healthy = false;
+  const recovery = harness(undefined, {status: async () => ({ready:healthy, error:'[WHISPER_CONNECTION] test service unavailable'}), transcribe: async () => 'Recovered transcript.'});
+  await recovery.api.refreshTranscriptionStatus();
+  assert.equal(recovery.element('#recordButton').disabled, false, 'failed startup check must not permanently disable recovery');
+  assert.match(recovery.element('#transcriptionStatus').textContent, /WHISPER_CONNECTION/);
+  await recovery.api.toggleRecording();
+  assert.equal(recovery.api.busy, false, 'failed recheck must release recording lock');
+  healthy = true;
+  await recovery.api.toggleRecording();
+  assert.equal(recovery.api.speakingPhase, 'recording', 'record button must recheck readiness');
+  await recovery.api.toggleRecording();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(recovery.persisted().speaking[0].transcript, 'Recovered transcript.');
+
   let completeTranscription;
   const offline = harness(undefined, {status: async () => ({ready:true}), transcribe: () => new Promise(resolve => {completeTranscription = resolve;})});
   await offline.api.refreshTranscriptionStatus();

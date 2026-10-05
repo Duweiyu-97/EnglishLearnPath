@@ -39,6 +39,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Platform smoke test failed' }
           node tests/speaking-writing-regression.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Practice regression test failed' }
+          node tests/whisper-client-regression.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Whisper client regression test failed' }
 
       - name: Check launcher
         shell: pwsh

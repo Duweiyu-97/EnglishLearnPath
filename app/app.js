@@ -1950,23 +1950,31 @@
   }
 
   async function refreshTranscriptionStatus() {
-    try { localTranscriptionReady = Boolean((await window.localWhisper?.status())?.ready); } catch { localTranscriptionReady = false; }
-    $("#retryLocalTranscription").disabled = !localTranscriptionReady;
-    $("#recordButton").disabled = !localTranscriptionReady;
-    $("#transcriptionStatus").textContent = localTranscriptionReady ? "已内置 whisper.cpp + small.en。结束录音后会自动在本机转写，不上传音频，也不需要 API Key。" : "未检测到本地语音组件。请使用包含 Whisper 的完整离线包；浏览器转写已停用。";
+    let status;
+    try { status = await window.localWhisper?.status(); } catch { status = {error: "[WHISPER_CONNECTION] 无法连接本机服务，请重新启动学习中心"}; }
+    localTranscriptionReady = Boolean(status?.ready);
+    $("#retryLocalTranscription").disabled = recordingBusy;
+    $("#recordButton").disabled = recordingBusy;
+    const info = status?.version ? `（${status.version} / ${status.platform || "未知系统"}）` : "";
+    $("#transcriptionStatus").textContent = localTranscriptionReady ? `已内置 whisper.cpp + small.en。结束录音后会自动在本机转写，不上传音频，也不需要 API Key。${info}` : `${status?.error || "[WHISPER_COMPONENTS] 本地转写未就绪，请使用完整离线包的启动程序打开页面"}。处理后点击录音或重新转写会重新检测。${info}`;
+    return localTranscriptionReady;
   }
 
   async function transcribeLocalRecording(session = recordingSession) {
-    if (!localTranscriptionReady || !recordingBlob) { showToast("需要完整离线包和一段已结束的录音"); return; }
+    if (localTranscriptionController || recorder?.state === "recording" || speakingPhase === "preparing") return;
+    if (!recordingBlob) { showToast("请先录制或从历史记录载入一段录音"); return; }
     const blob = recordingBlob;
     recordingBusy = true;
     const controller = new AbortController();
     localTranscriptionController = controller;
     $("#cancelLocalTranscription").classList.remove("hidden");
     $("#retryLocalTranscription").disabled = true;
+    $("#recordButton").disabled = true;
     $("#speakingTranscript").disabled = true;
     $("#recordHint").textContent = "Whisper 正在本机处理录音……长录音可能需要几分钟，可取消；录音不会上传。";
     try {
+      if (!localTranscriptionReady && !await refreshTranscriptionStatus()) throw new Error($("#transcriptionStatus").textContent);
+      if (session !== recordingSession || controller.signal.aborted) return;
       const text = await window.localWhisper.transcribe(blob,controller.signal);
       if (session !== recordingSession) return;
       $("#speakingTranscript").value = text;
@@ -1976,7 +1984,8 @@
     } finally {
       if (session === recordingSession) {
         recordingBusy = false; localTranscriptionController = null;
-        $("#retryLocalTranscription").disabled = !localTranscriptionReady;
+        $("#retryLocalTranscription").disabled = false;
+        $("#recordButton").disabled = false;
         $("#speakingTranscript").disabled = false;
         $("#cancelLocalTranscription").classList.add("hidden");
       }
@@ -2043,11 +2052,14 @@
       return;
     }
     if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") return showToast("当前浏览器不支持录音，请换用新版 Edge 或 Chrome");
-    if (!localTranscriptionReady) return showToast("本地 Whisper 组件缺失，请使用完整离线包");
     if ((recordingBlob || $("#speakingTranscript").value.trim()) && !confirm("重新录音会替换当前编辑区的录音与文字稿。已保存的历史记录会保留到你再次保存为止，是否继续？")) return;
     recordingBusy = true;
     const session = ++recordingSession;
+    $("#recordButton").disabled = true;
+    $("#retryLocalTranscription").disabled = true;
     try {
+      if (!localTranscriptionReady && !await refreshTranscriptionStatus()) { showToast($("#transcriptionStatus").textContent); return; }
+      if (session !== recordingSession) return;
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       if (session !== recordingSession) { stream.getTracks().forEach(track => track.stop()); return; }
       recordingStream = stream;
@@ -2068,7 +2080,7 @@
       recordingStream = null;
       showToast(`无法开始录音：${error.message}`);
     } finally {
-      if (session === recordingSession) recordingBusy = false;
+      if (session === recordingSession) { recordingBusy = false; $("#recordButton").disabled = false; $("#retryLocalTranscription").disabled = false; }
     }
   }
 
@@ -2132,7 +2144,7 @@
   function resetSpeakingMedia() {
     localTranscriptionController?.abort(); localTranscriptionController = null;
     $("#cancelLocalTranscription").classList.add("hidden");
-    $("#retryLocalTranscription").disabled = !localTranscriptionReady;
+    $("#retryLocalTranscription").disabled = false;
     $("#speakingTranscript").disabled = false;
     $("#speakingPart").disabled = false;
     recordingSession += 1;
@@ -2159,7 +2171,7 @@
     playback.load();
     playback.classList.add("hidden");
     $("#downloadRecording").classList.add("hidden");
-    $("#recordButton").disabled = !localTranscriptionReady;
+    $("#recordButton").disabled = false;
     $("#recordPulse").classList.remove("is-recording");
     $("#recordPulse").classList.remove("is-preparing");
     updateSpeakingPartGuide();

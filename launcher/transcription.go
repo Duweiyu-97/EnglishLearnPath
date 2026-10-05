@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -23,17 +24,27 @@ var transcriptionLock sync.Mutex
 func whisperPaths() (string, string, error) {
 	dir, err := findResourceDir("whisper")
 	if err != nil {
-		return "", "", err
+		return "", "", fmt.Errorf("[WHISPER_FOLDER_MISSING] 缺少 whisper 文件夹，请完整解压发布页的 Full 包，不要只移动启动程序")
 	}
+	return checkWhisperFiles(dir)
+}
+
+func checkWhisperFiles(dir string) (string, string, error) {
 	executable := "whisper-cli"
 	if runtime.GOOS == "windows" {
 		executable += ".exe"
 	}
 	engine, model := filepath.Join(dir, executable), filepath.Join(dir, "ggml-small.en.bin")
-	for _, path := range []string{engine, model} {
+	for index, path := range []string{engine, model} {
 		info, err := os.Stat(path)
 		if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
-			return "", "", fmt.Errorf("本地转写组件不完整，请重新解压完整包")
+			if index == 0 {
+				return "", "", fmt.Errorf("[WHISPER_ENGINE_MISSING] 语音引擎缺失或无法读取，请重新完整解压 Full 包，并检查安全软件的隔离记录；不要关闭安全防护")
+			}
+			return "", "", fmt.Errorf("[WHISPER_MODEL_MISSING] 缺少 small.en 模型，请重新下载并完整解压 Full 包（不是 Source code）")
+		}
+		if index == 1 && info.Size() != 487614201 {
+			return "", "", fmt.Errorf("[WHISPER_MODEL_INCOMPLETE] small.en 模型大小不正确，可能未完整下载或解压，请重新解压 Full 包")
 		}
 	}
 	return engine, model, nil
@@ -41,7 +52,34 @@ func whisperPaths() (string, string, error) {
 
 func handleTranscriptionStatus(w http.ResponseWriter, r *http.Request) {
 	_, _, err := whisperPaths()
-	writeJSON(w, http.StatusOK, map[string]any{"ready": err == nil, "engine": "whisper.cpp", "model": "small.en", "local": true, "maxSeconds": 480})
+	message := ""
+	if err != nil {
+		message = err.Error()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ready": err == nil, "error": message, "version": appVersion, "platform": runtime.GOOS + "/" + runtime.GOARCH, "engine": "whisper.cpp", "model": "small.en", "local": true, "maxSeconds": 480})
+}
+
+func whisperRunError(ctx context.Context, err error) error {
+	if ctx.Err() != nil {
+		return fmt.Errorf("[WHISPER_CANCELED] 本地转写已取消或超时，录音仍保留")
+	}
+	if errors.Is(err, os.ErrPermission) {
+		return fmt.Errorf("[WHISPER_PERMISSION] 系统拒绝启动语音引擎，请检查应用运行权限或安全软件的隔离记录；不要关闭安全防护")
+	}
+	var failure *exec.ExitError
+	if errors.As(err, &failure) {
+		code := uint32(failure.ExitCode())
+		if runtime.GOOS == "windows" {
+			switch code {
+			case 0xc000001d:
+				return fmt.Errorf("[WHISPER_CPU] 语音引擎使用了电脑不支持的指令，请将此代码及系统版本反馈给开发者")
+			case 0xc0000135, 0xc000007b:
+				return fmt.Errorf("[WHISPER_RUNTIME] 语音引擎无法加载，请使用官方 Windows 完整包，不要从其他版本复制引擎")
+			}
+		}
+		return fmt.Errorf("[WHISPER_EXIT_%08X] 语音引擎运行失败，录音仍保留。请关闭占用大量内存的程序后重试，并反馈此代码", code)
+	}
+	return fmt.Errorf("[WHISPER_START_FAILED] 无法启动语音引擎，请重新完整解压对应系统的 Full 包，并检查运行权限")
 }
 
 func validateTranscriptionWAV(data []byte) error {
@@ -81,10 +119,7 @@ func transcribeWAV(ctx context.Context, engine, model string, data []byte) (stri
 	hideTranscriptionWindow(command)
 	command.Stdout, command.Stderr = io.Discard, io.Discard
 	if err := command.Run(); err != nil {
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("本地转写已取消或超时，录音仍保留")
-		}
-		return "", fmt.Errorf("本地语音引擎运行失败，请确认使用完整包且电脑有足够可用内存")
+		return "", whisperRunError(ctx, err)
 	}
 	file, err := os.Open(output + ".txt")
 	if err != nil {
@@ -130,10 +165,7 @@ func transcribePipedWAV(ctx context.Context, engine, model string, data []byte) 
 	command.Stdout, command.Stderr = output, io.Discard
 	hideTranscriptionWindow(command)
 	if err := command.Run(); err != nil {
-		if ctx.Err() != nil {
-			return "", fmt.Errorf("本地转写已取消或超时，录音仍保留")
-		}
-		return "", fmt.Errorf("本地语音引擎运行失败（%v），录音仍保留，请确认完整包未损坏且内存充足", err)
+		return "", whisperRunError(ctx, err)
 	}
 	result := strings.TrimSpace(output.buffer.String())
 	if result == "" {
@@ -163,7 +195,7 @@ func handleTranscription(w http.ResponseWriter, r *http.Request) {
 	defer transcriptionLock.Unlock()
 	engine, model, err := whisperPaths()
 	if err != nil {
-		writeError(w, http.StatusServiceUnavailable, "本地语音组件缺失，请使用包含 Whisper 的完整包")
+		writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxTranscriptionAudio)

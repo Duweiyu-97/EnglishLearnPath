@@ -37,6 +37,9 @@ func TestBundledWhisperPublicSample(t *testing.T) {
 	if bundle == "" || fixture == "" {
 		t.Skip("release smoke fixture not configured")
 	}
+	if _, _, err := checkWhisperFiles(bundle); err != nil {
+		t.Fatal(err)
+	}
 	raw, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatal(err)
@@ -137,6 +140,39 @@ func TestTranscriptBufferLimit(t *testing.T) {
 	}
 	if buffer.buffer.Len() != 256*1024 {
 		t.Fatal("buffer exceeded limit")
+	}
+}
+
+func TestWhisperComponentDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	assertCode := func(code string) {
+		t.Helper()
+		_, _, err := checkWhisperFiles(dir)
+		if err == nil || !strings.Contains(err.Error(), code) {
+			t.Fatalf("expected %s, got %v", code, err)
+		}
+	}
+	assertCode("WHISPER_ENGINE_MISSING")
+	engine := "whisper-cli"
+	if runtime.GOOS == "windows" {
+		engine += ".exe"
+	}
+	if err := os.WriteFile(filepath.Join(dir, engine), []byte("fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	assertCode("WHISPER_MODEL_MISSING")
+	model := filepath.Join(dir, "ggml-small.en.bin")
+	if err := os.WriteFile(model, []byte("truncated model"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	assertCode("WHISPER_MODEL_INCOMPLETE")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := whisperRunError(ctx, context.Canceled); !strings.Contains(err.Error(), "WHISPER_CANCELED") {
+		t.Fatal(err)
+	}
+	if err := whisperRunError(context.Background(), os.ErrPermission); !strings.Contains(err.Error(), "WHISPER_PERMISSION") {
+		t.Fatal(err)
 	}
 }
 func TestTranscriptionWAVValidation(t *testing.T) {
