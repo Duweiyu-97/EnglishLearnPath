@@ -489,7 +489,7 @@
           { role: "user", content: `今天：${today()}\n预计考试日期：${profile.examDate}\n计划总天数：${totalDays}\n现有水平：${profile.currentLevel}\n目标水平：${profile.targetLevel}\n每日时间：${profile.dailyMinutes} 分钟\n重点与限制：${profile.focus || "未补充"}\n固定阶段窗口：${JSON.stringify(blueprints)}\n请为每个阶段安排不同的训练重点和周一至周日执行节奏。` }
         ],
         temperature: 0,
-        max_tokens: 3500,
+        max_tokens: 6000,
         output_contract: "study-plan-json-v1"
       };
       let parsed, phases;
@@ -505,8 +505,9 @@
           const data = await response.json().catch(() => ({}));
           if (!response.ok) {
             const failure = new Error(data.error || `AI 计划生成失败（HTTP ${response.status}）`);
+            failure.outputLengthFailure = data.code === "AI_OUTPUT_LENGTH" || /(?:输出达到长度上限|输出.*截断)/.test(failure.message);
             const authFailure = /(?:API\s*Key|鉴权|认证|未授权|unauthori[sz]ed|forbidden|余额|quota)/i.test(failure.message);
-            failure.retryableAiFailure = !authFailure && [408, 425, 429, 500, 502, 503, 504].includes(response.status);
+            failure.retryableAiFailure = ![401, 403].includes(response.status) && (failure.outputLengthFailure || (!authFailure && [408, 425, 429, 500, 502, 503, 504].includes(response.status)));
             throw failure;
           }
           parsed = parseAiJson(data.content);
@@ -527,7 +528,9 @@
         } catch (error) {
           const formatFailure = /(?:JSON|格式|字段|数组|阶段|七天|执行节奏|网页报告)/i.test(error.message);
           if (attempt || (!formatFailure && !error.retryableAiFailure)) throw error;
+          if (error.outputLengthFailure || formatFailure) payload.max_tokens = 8000;
           result.textContent = formatFailure ? "AI 首次返回的计划结构不完整，正在自动重试一次……" : "AI 服务首次响应不稳定，正在自动重试一次……";
+          if (error.outputLengthFailure) result.textContent = "AI 输出额度不足，正在提高额度并自动重试一次；原计划保持不变……";
           if (!formatFailure) await new Promise(resolve => setTimeout(resolve, 500));
         }
       }

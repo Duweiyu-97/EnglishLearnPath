@@ -312,6 +312,8 @@ func handleAIDisconnect(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+var errAIOutputLength = errors.New("模型输出达到长度上限，尚未生成完整最终答案；请增加输出额度或使用非思考模式模型")
+
 func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	var input chatRequest
 	if err := decodeJSONLimit(w, r, &input, maxAIRequest); err != nil {
@@ -357,6 +359,10 @@ func handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 	content, err := callChat(r.Context(), cfg, input.Messages, input.Temperature, maxTokens, false)
 	if err != nil {
+		if errors.Is(err, errAIOutputLength) {
+			writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error(), "code": "AI_OUTPUT_LENGTH", "retryable": true})
+			return
+		}
 		writeError(w, http.StatusBadGateway, err.Error())
 		return
 	}
@@ -537,10 +543,11 @@ func callChat(ctx context.Context, cfg aiConfig, messages []chatMessage, tempera
 		return "", errors.New("模型响应中没有 choices")
 	}
 	content := extractContent(parsed.Choices[0].Message.Content)
+	// A truncated answer must never be accepted, even if its JSON parses.
+	if parsed.Choices[0].FinishReason == "length" {
+		return "", errAIOutputLength
+	}
 	if strings.TrimSpace(content) == "" {
-		if parsed.Choices[0].FinishReason == "length" {
-			return "", errors.New("模型输出达到长度上限，尚未生成最终答案；这不是 API Key 无效的提示")
-		}
 		if strings.TrimSpace(parsed.Choices[0].Message.ReasoningContent) != "" {
 			return "", errors.New("模型只返回了思考内容，没有最终答案；请检查模型的思考模式和输出限制")
 		}

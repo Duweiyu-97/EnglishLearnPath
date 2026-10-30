@@ -144,3 +144,22 @@ func TestReasoningOnlyIsNotReturnedAsFinalAnswer(t *testing.T) {
 		})
 	}
 }
+
+func TestTruncatedPlanReturnsStructuredError(t *testing.T) {
+	previous := settings
+	settings = &configStore{value: aiConfig{BaseURL: "https://example.test", Model: "test", Connected: true}}
+	t.Cleanup(func() { settings = previous })
+	for _, content := range []string{"", "{\"phases\":[]}"} {
+		raw, _ := json.Marshal(map[string]any{"choices": []any{map[string]any{"finish_reason": "length", "message": map[string]any{"content": content}}}})
+		mockAI(t, string(raw), nil)
+		w := httptest.NewRecorder()
+		handleAIChat(w, httptest.NewRequest(http.MethodPost, "/api/ai/chat", strings.NewReader(`{"messages":[{"role":"user","content":"Plan"}],"output_contract":"study-plan-json-v1","max_tokens":6000}`)))
+		var result map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if w.Code != 502 || result["code"] != "AI_OUTPUT_LENGTH" || result["retryable"] != true || result["content"] != nil {
+			t.Fatalf("unexpected response: %s", w.Body.String())
+		}
+	}
+}

@@ -4,7 +4,7 @@ import vm from 'node:vm';
 
 const source = await readFile(new URL('../app/app.js', import.meta.url), 'utf8');
 const timers = new Set();
-function harness(initialState, localWhisper) {
+function harness(initialState, localWhisper, planResponse) {
   localWhisper ||= { status: async () => ({ready:true}), transcribe: async () => 'Local Whisper result.' };
   const elements = new Map();
   let persisted;
@@ -66,6 +66,7 @@ function harness(initialState, localWhisper) {
       if (url === '/api/ai/chat') {
         const request = JSON.parse(options.body);
         chatRequests.push(request);
+        if (request.output_contract === 'study-plan-json-v1' && planResponse) return planResponse(request);
         const content = request.output_contract === 'personal-language-bank-json-v1'
           ? JSON.stringify({summary:'My bank',speaking:[{title:'Cycling',personalCore:'I enjoy cycling with friends.',reusableTopics:['hobbies'],expressions:['clear my mind'],answerFrames:['answer → reason → example']}],writing:[{domain:'education',collocations:['equal access｜平等的机会'],sentencePatterns:['It is important to...｜……十分重要']} ]})
           : 'Synthetic feedback';
@@ -80,6 +81,7 @@ function harness(initialState, localWhisper) {
   });
   vm.runInContext(source.replace(/  initialize\(\);\s*\}\)\(\);\s*$/, `
     globalThis.api = { refreshTranscriptionStatus, transcribeLocalRecording, bindEvents, toggleRecording, saveWriting, saveSpeaking, loadSpeaking, newSpeaking, loadWriting, todayPlanTasks, normalizePlanDay, normalizeAiPlanDay, reviewWriting, reviewSpeaking, reviewLearnerContext, reviewTopicTitle, practiceTitle, generateLanguageBank, normalizeLanguageBank, languageBankSource,
+      generateAiPlan, buildPhaseBlueprints,
       enableAi() { aiConnected = true; },
       get busy() { return recordingBusy; }, get blob() { return recordingBlob; }, get speakingPhase() { return speakingPhase; },
       get state() { return state; }, set state(value) { state = normalizeState(value); }
@@ -94,6 +96,35 @@ function harness(initialState, localWhisper) {
 }
 
 try {
+  for (const scenario of ['length', 'legacy-length', 'always-length', 'auth']) {
+    const budgets = [];
+    let plan;
+    const h = harness(undefined, undefined, request => {
+      budgets.push(request.max_tokens);
+      if (budgets.length === 1 || scenario === 'always-length') return {ok:false,status:scenario === 'auth' ? 401 : 502,json:async () => ({code:scenario === 'legacy-length' ? undefined : 'AI_OUTPUT_LENGTH',error:'模型输出达到长度上限，尚未生成最终答案；这不是 API Key 无效的提示'})};
+      return {ok:true,json:async () => ({content:JSON.stringify(plan)})};
+    });
+    const exam = new Date(); exam.setDate(exam.getDate() + 180);
+    const date = `${exam.getFullYear()}-${String(exam.getMonth()+1).padStart(2,'0')}-${String(exam.getDate()).padStart(2,'0')}`;
+    h.element('#planExamDate').value = date;
+    h.element('#planCurrentLevel').value = '5.5'; h.element('#planTargetLevel').value = '7'; h.element('#planDailyMinutes').value = '90';
+    plan = {summary:'Recovered plan',priorities:[],phases:h.api.buildPhaseBlueprints(date).map(b => ({...b,days:Array.from({length:7},()=>({writing:0,speaking:1,writingReview:0,writingRewrite:0,speakingReview:1,languageMinutes:10,reviewMinutes:30,note:'Review'}))}))};
+    h.api.state.studyPlan = {summary:'Keep original'};
+    h.api.state.planProgress = {existing:true};
+    h.api.enableAi();
+    await h.api.generateAiPlan();
+    assert.deepEqual(budgets, scenario === 'auth' ? [6000] : [6000,8000]);
+    assert.equal(h.element('#generateAiPlan').disabled, false);
+    if (scenario === 'auth' || scenario === 'always-length') {
+      assert.equal(h.api.state.studyPlan.summary, 'Keep original');
+      assert.equal(h.api.state.planProgress.existing, true);
+      assert.equal(h.persisted(), undefined, 'failed generation must not write over old plan');
+    } else {
+      assert.equal(h.persisted().studyPlan.summary, 'Recovered plan');
+      assert.equal(h.persisted().studyPlan.phases.length, plan.phases.length);
+    }
+  }
+
   let healthy = false;
   const recovery = harness(undefined, {status: async () => ({ready:healthy, error:'[WHISPER_CONNECTION] test service unavailable'}), transcribe: async () => 'Recovered transcript.'});
   await recovery.api.refreshTranscriptionStatus();

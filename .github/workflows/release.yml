@@ -112,6 +112,10 @@ jobs:
       - name: Check macOS launcher
         shell: bash
         run: |
+          node tests/static-smoke.mjs
+          node tests/speaking-writing-regression.mjs
+          node tests/whisper-client-regression.mjs
+          node tests/macos-platform-smoke.mjs
           find launcher -name '*.go' -print0 | xargs -0 gofmt -w
           git diff --exit-code
           cd launcher
