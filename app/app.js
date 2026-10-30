@@ -409,9 +409,26 @@
     return phases;
   }
 
+  function buildCalendarBlueprints(examDate) {
+    const stages = [];
+    for (const [macroIndex, macro] of buildPhaseBlueprints(examDate).entries()) {
+      let cursor = macro.startDate, week = 1;
+      while (cursor <= macro.endDate) {
+        const endDate = [formatPlanDate(addPlanDays(cursor,6)),macro.endDate].sort()[0];
+        const step=week++;
+        const cycleGoals=["校准本阶段方法与薄弱点","运用方法完成专项练习","整合计时输出与重练","检查阶段证据并回收错题"];
+        stages.push({name:`${macro.name} · 第 ${step} 小阶段`,macroIndex,macroName:macro.name,step,
+          focus:`${macro.focus} 本小阶段：${cycleGoals[(step-1)%4]}；依据前序任务持续推进。`,startDate:cursor,endDate});
+        cursor = formatPlanDate(addPlanDays(endDate,1));
+      }
+    }
+    return stages;
+  }
+
   function phasesForPlan(plan) {
     if (!plan) return [];
     if (Array.isArray(plan.phases) && plan.phases.length) {
+      if (plan.scheduleVersion === 2) return plan.phases.map(phase=>({...phase,days:phase.days.map(day=>({...normalizePlanDay(day),date:day.date}))}));
       return plan.phases.map(phase => ({
         name: String(phase.name || "学习阶段"),
         focus: String(phase.focus || ""),
@@ -495,28 +512,34 @@
       validatePlanProfile(profile);
       if (profile.currentLevel.length > 200 || profile.targetLevel.length > 200 || profile.focus.length > 2000)
         throw new Error("水平描述最多 200 字，重点与限制最多 2000 字；请精简后生成，不会自动删掉你的输入");
-      const blueprints = buildPhaseBlueprints(profile.examDate);
+      const macroStages = buildPhaseBlueprints(profile.examDate);
+      const blueprints = buildCalendarBlueprints(profile.examDate);
       const totalDays = planDaysInclusive(today(), profile.examDate);
       button.disabled = true;
       $("#cancelAiPlan").disabled = false;
       result.className = "feedback-box";
-      deadline = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+      if (totalDays > 1096) throw new Error("一次计划最多覆盖三年，请先设置三年内的阶段目标；不会截掉后续日期");
+      deadline = setTimeout(() => controller.abort(), Math.min(60 * 60 * 1000,blueprints.length * 2 * 60 * 1000));
       let requests = 0;
-      const maxRequests = 20;
+      const maxRequests = Math.min(800,blueprints.length * 7 + 10);
       const phases = [];
-      // Context is bounded by four seven-day templates, never conversation logs.
-      const sharedContext = {profile, roadmap:blueprints, rules:{reviewShare:0.4,lightDay:7,scope:["writing","speaking","review"]}};
+      const sharedContext = {profile,macroStages,roadmap:blueprints.map(({startDate,endDate,macroIndex,step})=>({startDate,endDate,macroIndex,step})),
+        analysis:{totalDays,totalHours:Math.round(totalDays*profile.dailyMinutes/60),dailyMinutes:profile.dailyMinutes,
+          intensity:profile.dailyMinutes<=45?"轻量持续":profile.dailyMinutes<=120?"常规训练":"高强度，需安排恢复日",
+          goalGap:`现有：${profile.currentLevel}；目标：${profile.targetLevel}。未经过测评，不承诺达标。`},
+        rules:{reviewShare:0.4,scope:["writing","speaking","review"]}};
       async function batch(blueprint, weekdays, phaseIndex, precedingDays = []) {
         for (let attempt = 0; attempt < 2; attempt++) {
           checkCurrent(profile);
-          if (requests >= maxRequests) throw new Error("已达到本次 20 次请求上限，原计划保持不变；请使用非思考模式模型后重试");
+          if (requests >= maxRequests) throw new Error(`已达到本次 ${maxRequests} 次请求上限，原计划保持不变；请使用非思考模式模型后重试`);
           requests++;
           result.textContent = `正在生成阶段 ${phaseIndex + 1}/${blueprints.length}：星期 ${weekdays.join("、")}（请求 ${requests}/${maxRequests}）……原计划尚未替换。`;
           const payload = {
             messages: [
               {role:"system", content:"你是写作与口语学习规划师。只输出 JSON：{summary:string,priorities:string[],phases:[{days:[]}]}，phases 只能有一项。仅生成指定阶段、指定 weekday 的任务，weekday 为周一 1 到周日 7，严格按指定顺序，每天恰好一次。每项含 weekday、writing、speaking、writingReview、writingRewrite、speakingReview、languageMinutes、reviewMinutes、note。所有数值是非负整数；writing、writingReview、writingRewrite、speakingReview 至多1，speaking至多2，languageMinutes至多60，reviewMinutes至多240。note至多50字，summary至多120字，priorities至多4条。不要输出解释或思考。只规划写作、口语及复盘，不安排其他科目。至少 40% 的可用时间安排给复盘、重练和语料记忆，任务量符合每日时间；周日安排轻量复盘。写作应包含精改、重写；口语应包含回听、重说。不要虚构诊断。"},
               {role:"system",content:"衔接要求：sharedContext 是整个计划统一且不可改写的框架。completedPhases 和 precedingDays 是已确认内容，只能承接，不能重写或假设未提供的完成情况。根据后续 roadmap 阶段目标安排当前任务：基础、强化、冲刺逐步推进，不在冲刺期重新安排大量基础新课。拆分只改变本次输出范围，目标、术语、时间约束和训练重点保持一致；后半批承接前半批的写作精改、重写、口语重说与复盘，避免重复引入同一任务或无前序练习的孤立重练。后续阶段尚未生成，只能按其目标预留衔接，不能声称已知道其具体任务。"},
-              {role:"user", content:JSON.stringify({sharedContext,profile, phase:blueprint, phaseIndex, phaseCount:blueprints.length, weekdays,completedPhases:phases,precedingDays:precedingDays.map((day,i)=>({weekday:i+1,...day}))})}
+              {role:"system",content:"整个周期已先分析时长、每日强度，再分大阶段与按实际日期的小阶段。每个小阶段必须依据其在大阶段中的位置改变任务重点，不能复制周模板。dates 按顺序列出本批实际日期；每天必须返回对应 date 和 weekday（小阶段中的序号，不是自然星期）。examDate 当天全部任务为0，仅热身说明。每日估算分钟=writing*40+speaking*10+writingReview*10+writingRewrite*15+speakingReview*10+languageMinutes+reviewMinutes，不得超出 dailyMinutes；至少40%用于复盘。高强度周期每周安排恢复日。completedMilestones 表示更早小阶段已确认的训练目标及数量，completedPhases 是最近小阶段实际内容，precedingDays 是本小阶段已完成批次。后续目标从 roadmap 读取，保持先基础后专项再整合冲刺。"},
+              {role:"user", content:JSON.stringify({sharedContext,profile, phase:blueprint, phaseIndex, phaseCount:blueprints.length, weekdays, dates:weekdays.map(n=>formatPlanDate(addPlanDays(blueprint.startDate,n-1))),completedMilestones:phases.slice(0,-1).map(p=>({macroIndex:p.macroIndex,step:p.step,startDate:p.startDate,endDate:p.endDate,totals:p.days.reduce((a,d)=>({writing:a.writing+d.writing,speaking:a.speaking+d.speaking}),{writing:0,speaking:0})})),completedPhases:phases.slice(-1),precedingDays:precedingDays.map((day,i)=>({weekday:i+1,...day}))})}
             ], temperature:0, max_tokens:6000, output_contract:"study-plan-json-v1"
           };
           try {
@@ -543,7 +566,23 @@
                 Object.entries(limits).some(([key,max]) => !Number.isInteger(day[key]) || day[key] < 0 || day[key] > max)))
                 throw new Error("日期、任务字段或数值不完整");
             } catch (error) { error.planFormatFailure = true; throw error; }
-            return days.map(normalizeAiPlanDay);
+            const normalizedDays = days.map((day,i)=>({...normalizeAiPlanDay(day),date:formatPlanDate(addPlanDays(blueprint.startDate,weekdays[i]-1))}));
+            if (days.some((day,i)=>day.date !== normalizedDays[i].date)) {
+              const error = new Error("返回日期不匹配"); error.planFormatFailure=true; throw error;
+            }
+            for (const day of normalizedDays) {
+              if (day.date === profile.examDate) {
+                if (Object.entries(day).some(([key,value])=>typeof value === "number" && value !== 0)) {
+                  const error=new Error("考试日任务必须为零");error.planFormatFailure=true;throw error;
+                }
+              }
+              const outputMinutes=day.writing*40+day.speaking*10;
+              const reviewMinutes=day.writingReview*10+day.writingRewrite*15+day.speakingReview*10+day.languageMinutes+day.reviewMinutes;
+              if (outputMinutes+reviewMinutes>profile.dailyMinutes || reviewMinutes<(outputMinutes+reviewMinutes)*0.4) {
+                const error=new Error("任务超过每日时间或复盘比例不足");error.planFormatFailure=true;throw error;
+              }
+            }
+            return normalizedDays;
           } catch (error) {
             checkCurrent(profile);
             if (error.splitBatch) {
@@ -559,18 +598,19 @@
         }
       }
       for (const [index, blueprint] of blueprints.entries()) {
-        const days = await batch(blueprint, [1,2,3,4,5,6,7], index);
-        if (days.length !== 7) throw new Error("阶段天数不完整，原计划保持不变");
+        const length=planDaysInclusive(blueprint.startDate,blueprint.endDate);
+        const days = await batch(blueprint, Array.from({length},(_,i)=>i+1), index);
+        if (days.length !== length) throw new Error("阶段天数不完整，原计划保持不变");
         phases.push({...blueprint, days});
       }
       let expectedStart = blueprints[0].startDate;
       for (const phase of phases) {
-        if (phase.startDate !== expectedStart || phase.days.length !== 7 || phase.endDate < phase.startDate)
+        if (phase.startDate !== expectedStart || phase.days.length !== planDaysInclusive(phase.startDate,phase.endDate) || phase.endDate < phase.startDate)
           throw new Error("阶段日期不连续，原计划保持不变");
         expectedStart = formatPlanDate(addPlanDays(phase.endDate,1));
       }
       if (phases.at(-1).endDate !== profile.examDate) throw new Error("计划未覆盖考试日期，原计划保持不变");
-      const candidate = {source:"ai",createdAt:new Date().toISOString(),profile,
+      const candidate = {source:"ai",scheduleVersion:2,analysis:sharedContext.analysis,macroStages,createdAt:new Date().toISOString(),profile,
         summary:`从 ${blueprints[0].startDate} 到 ${profile.examDate}，共 ${totalDays} 天、${phases.length} 个阶段；每日约 ${profile.dailyMinutes} 分钟。`,
         priorities:profile.focus ? [profile.focus] : [],phases};
       checkCurrent(profile);
@@ -595,7 +635,7 @@
       showToast("考前学习计划已生成");
     } catch (error) {
       result.className = "feedback-box is-error";
-      result.textContent = `生成失败：${controller.signal.aborted ? "已取消或超过 5 分钟，原计划保持不变" : error.message}`;
+      result.textContent = `生成失败：${controller.signal.aborted ? "已取消或超过本次时间上限，原计划保持不变" : error.message}`;
     } finally {
       clearTimeout(deadline);
       planGenerationController = null; planCommitting = false;
@@ -652,6 +692,9 @@
         `口语回听 ${day.speakingReview} 次`, `语料记忆 ${day.languageMinutes} 分钟`, `错题与单词 ${day.reviewMinutes} 分钟`
       ];
       phasePlan.innerHTML = `<article class="plan-phase manual-plan-summary"><header><div><strong>每天按你的设置执行</strong><span>${escapeHtml(phases[0].startDate)} — ${escapeHtml(phases[0].endDate)}</span></div><p>以下数量完全来自手动设置；写作页和口语页会分别显示当天细则。</p></header><div class="manual-plan-values">${details.map(text => `<span>${escapeHtml(text)}</span>`).join("")}</div></article>`;
+    } else if (plan.scheduleVersion === 2) {
+      summary.textContent += `\n周期分析：${plan.analysis?.totalDays || 0} 天 · 约 ${plan.analysis?.totalHours || 0} 小时 · ${plan.analysis?.intensity || "按每日时间执行"}。${plan.macroStages?.length || 0} 个大阶段，${phases.length} 个小阶段，每日独立安排。`;
+      phasePlan.innerHTML = (plan.macroStages || []).map((macro,index)=>`<article class="plan-phase"><header><div><strong>${escapeHtml(macro.name)}</strong><span>${escapeHtml(macro.startDate)} — ${escapeHtml(macro.endDate)}</span></div><p>${escapeHtml(macro.focus)}</p></header>${phases.filter(p=>p.macroIndex===index).map(p=>`<details><summary>${escapeHtml(p.name)} · ${escapeHtml(p.startDate)} — ${escapeHtml(p.endDate)}</summary><p>${escapeHtml(p.focus)}</p>${p.days.map(d=>`<p><strong>${escapeHtml(d.date)}</strong> · 写作 ${d.writing} · 口语 ${d.speaking} · 精改 ${d.writingReview} · 重写 ${d.writingRewrite} · 回听 ${d.speakingReview} · 语料 ${d.languageMinutes} 分钟 · 错题 ${d.reviewMinutes} 分钟<br>${escapeHtml(d.note)}</p>`).join("")}</details>`).join("")}</article>`).join("");
     } else {
       phasePlan.innerHTML = phases.map(phase => `<article class="plan-phase"><header><div><strong>${escapeHtml(phase.name)}</strong><span>${escapeHtml(phase.startDate)} — ${escapeHtml(phase.endDate)} · ${planDaysInclusive(phase.startDate, phase.endDate)} 天</span></div><p>${escapeHtml(phase.focus || "按阶段目标稳定执行并及时复盘。")}</p></header><small class="plan-detail-location">每日写作与口语细则分别显示在对应模块首页。</small></article>`).join("");
     }
@@ -668,6 +711,10 @@
     }
     const phase = phasesForPlan(plan).find(item => dateString >= item.startDate && dateString <= item.endDate);
     if (!phase) return null;
+    if (plan.scheduleVersion === 2) {
+      const day=phase.days.find(item=>item.date===dateString);
+      return day ? {...day,phaseName:phase.name} : null;
+    }
     const day = normalizePlanDay(phase.days[mondayIndex(parsePlanDate(dateString))] || {});
     return { ...day, phaseName: phase.name };
   }

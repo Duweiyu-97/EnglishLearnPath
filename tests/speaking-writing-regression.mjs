@@ -82,7 +82,7 @@ function harness(initialState, localWhisper, planResponse, beforeWrite) {
   });
   vm.runInContext(source.replace(/  initialize\(\);\s*\}\)\(\);\s*$/, `
     globalThis.api = { refreshTranscriptionStatus, transcribeLocalRecording, bindEvents, toggleRecording, saveWriting, saveSpeaking, loadSpeaking, newSpeaking, loadWriting, todayPlanTasks, normalizePlanDay, normalizeAiPlanDay, reviewWriting, reviewSpeaking, reviewLearnerContext, reviewTopicTitle, practiceTitle, generateLanguageBank, normalizeLanguageBank, languageBankSource,
-      generateAiPlan, buildPhaseBlueprints, saveState,
+      generateAiPlan, buildPhaseBlueprints, buildCalendarBlueprints, planDayForDate, saveState,
       enableAi() { aiConnected = true; },
       get busy() { return recordingBusy; }, get blob() { return recordingBlob; }, get speakingPhase() { return speakingPhase; },
       get state() { return state; }, set state(value) { state = normalizeState(value); }
@@ -97,18 +97,18 @@ function harness(initialState, localWhisper, planResponse, beforeWrite) {
 }
 
 try {
-  for (const scenario of ['days-0','days-9','days-10','days-29','days-30','days-89','days-90','normal','split','legacy','cap','always-length','auth','bad-fields','duplicate','transient','late-failure','disk','changed','progress','cancel','double','long-input']) {
+  for (const scenario of ['days-0','days-9','days-10','days-29','days-30','days-89','days-90','days-365','days-730','days-1095','normal','split','legacy','cap','always-length','auth','bad-fields','duplicate','transient','late-failure','disk','changed','progress','cancel','double','long-input']) {
     const calls = [];
     let h;
     h = harness(undefined, undefined, async request => {
       const input = JSON.parse(request.messages.at(-1).content);
       calls.push(input);
       assert.equal(input.sharedContext.roadmap.length,input.phaseCount,'every batch knows all stage objectives');
-      assert.equal(input.completedPhases.length,input.phaseIndex,'every stage receives all confirmed previous stages');
+      assert.equal(input.completedMilestones.length+input.completedPhases.length,input.phaseIndex,'all preceding stages are represented');
       assert.equal(input.precedingDays.length,input.weekdays[0]-1,'recursive split must retain all preceding weekdays');
       assert.deepEqual(input.precedingDays.map(d=>d.weekday),Array.from({length:input.weekdays[0]-1},(_,i)=>i+1));
       if (calls.length>1) assert.deepEqual(input.sharedContext,calls[0].sharedContext,'framework cannot drift on splits or retries');
-      input.completedPhases.forEach(p=>assert.deepEqual(p.days.map(d=>d.note),['1','2','3','4','5','6','7'],'carry exact confirmed results, not invented summaries'));
+      input.completedPhases.forEach(p=>assert.deepEqual(p.days.map(d=>d.note),Array.from({length:p.days.length},(_,i)=>String(i+1)),'carry exact confirmed results'));
       if (scenario === 'changed') h.element('#planFocus').value = 'Changed while pending';
       if (scenario === 'progress') h.api.state.planProgress.newCheck = true;
       if (scenario === 'cancel') h.element('#cancelAiPlan').events.click();
@@ -117,7 +117,7 @@ try {
       if (truncate || scenario === 'auth' || (scenario === 'late-failure' && input.phaseIndex === 1))
         return {ok:false,status:scenario === 'auth' || scenario === 'late-failure' ? 401 : 502,json:async()=>({code:scenario === 'legacy' ? undefined : 'AI_OUTPUT_LENGTH',error:'模型输出达到长度上限；这不是 API Key 无效的提示'})};
       if (scenario === 'transient' && calls.length === 1) return {ok:false,status:503,json:async()=>({error:'temporarily unavailable'})};
-      const days = input.weekdays.map(weekday=>({weekday,writing:0,speaking:1,writingReview:0,writingRewrite:0,speakingReview:1,languageMinutes:10,reviewMinutes:30,note:String(weekday)}));
+      const days = input.weekdays.map((weekday,i)=>({weekday,date:input.dates[i],writing:0,speaking:input.dates[i]===date?0:1,writingReview:0,writingRewrite:0,speakingReview:input.dates[i]===date?0:1,languageMinutes:input.dates[i]===date?0:10,reviewMinutes:input.dates[i]===date?0:30,note:String(weekday)}));
       if (scenario === 'bad-fields') days[0].writing = '1';
       if (scenario === 'duplicate' && days.length > 1) days[1].weekday = days[0].weekday;
       return {ok:true,json:async()=>({content:JSON.stringify({summary:'batch',priorities:[],phases:[{days}]})})};
@@ -133,16 +133,22 @@ try {
     await h.api.generateAiPlan();
     const success = scenario.startsWith('days-') || ['normal','split','legacy','transient','double'].includes(scenario);
     assert.equal(h.element('#generateAiPlan').disabled,false,scenario);
-    assert.ok(calls.length<=20,scenario);
+    assert.ok(calls.length<=Math.min(800,h.api.buildCalendarBlueprints(date).length*7+10),scenario);
     if (success) {
+      assert.ok(h.persisted(),scenario+': '+h.element('#planResult').textContent);
       const saved=h.persisted().studyPlan;
-      assert.equal(saved.phases.length,h.api.buildPhaseBlueprints(date).length,scenario);
+      assert.equal(saved.phases.length,h.api.buildCalendarBlueprints(date).length,scenario);
       saved.phases.forEach((p,i)=>{
-        assert.deepEqual(p.days.map(d=>d.note),['1','2','3','4','5','6','7'],scenario);
-        assert.equal(p.startDate,h.api.buildPhaseBlueprints(date)[i].startDate);
-        assert.equal(p.endDate,h.api.buildPhaseBlueprints(date)[i].endDate);
+        assert.deepEqual(p.days.map(d=>d.note),Array.from({length:p.days.length},(_,i)=>String(i+1)),scenario);
+        assert.equal(p.startDate,h.api.buildCalendarBlueprints(date)[i].startDate);
+        assert.equal(p.endDate,h.api.buildCalendarBlueprints(date)[i].endDate);
       });
       assert.equal(saved.phases.at(-1).endDate,date);
+      const actualDates=saved.phases.flatMap(p=>p.days.map(d=>d.date));
+      assert.equal(new Set(actualDates).size,actualDates.length,'no repeated dates');
+      if(scenario.startsWith('days-'))assert.equal(actualDates.length,Number(scenario.slice(5))+1,'every actual calendar day is generated');
+      for(const p of saved.phases)for(const d of p.days){const found=h.api.planDayForDate(saved,d.date);assert.ok(found);assert.equal(found.writing,d.writing);assert.equal(found.speaking,d.speaking);}
+      assert.ok(calls.every(c=>Buffer.byteLength(JSON.stringify(c),'utf8')<120000),'long-cycle request stays within backend input bound');
       if (scenario==='normal' || scenario==='double') assert.equal(calls.length,saved.phases.length);
       if (scenario==='split') assert.deepEqual(calls.slice(0,5).map(c=>c.weekdays.length),[7,3,4,2,2]);
     } else {
@@ -152,7 +158,7 @@ try {
       assert.equal(h.persisted(),undefined,scenario);
       if (scenario==='auth') assert.equal(calls.length,1);
       if (scenario==='always-length') assert.equal(calls.length,3);
-      if (scenario==='cap') assert.equal(calls.length,20);
+      if (scenario==='cap') assert.equal(calls.length,Math.min(800,h.api.buildCalendarBlueprints(date).length*7+10));
       if (scenario==='long-input') assert.equal(calls.length,0);
     }
   }
@@ -162,8 +168,8 @@ try {
     const entered = new Promise(resolve => {enteredWrite=resolve;});
     let first=true;
     const h=harness(undefined,undefined, async request=>{
-      const {weekdays}=JSON.parse(request.messages.at(-1).content);
-      return {ok:true,json:async()=>({content:JSON.stringify({summary:'batch',priorities:[],phases:[{days:weekdays.map(weekday=>({weekday,writing:0,speaking:0,writingReview:0,writingRewrite:0,speakingReview:0,languageMinutes:10,reviewMinutes:30,note:'review'}))}]})})};
+      const {weekdays,dates,profile}=JSON.parse(request.messages.at(-1).content);
+      return {ok:true,json:async()=>({content:JSON.stringify({summary:'batch',priorities:[],phases:[{days:weekdays.map((weekday,i)=>({weekday,date:dates[i],writing:0,speaking:0,writingReview:0,writingRewrite:0,speakingReview:0,languageMinutes:dates[i]===profile.examDate?0:10,reviewMinutes:dates[i]===profile.examDate?0:30,note:'review'}))}]})})};
     },async()=>{if(first){first=false;enteredWrite();await new Promise(resolve=>{releaseWrite=resolve;});}});
     const exam=new Date();exam.setDate(exam.getDate()+1);
     h.element('#planExamDate').value=`${exam.getFullYear()}-${String(exam.getMonth()+1).padStart(2,'0')}-${String(exam.getDate()).padStart(2,'0')}`;

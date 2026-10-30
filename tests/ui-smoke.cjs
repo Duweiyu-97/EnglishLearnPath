@@ -29,7 +29,7 @@ const server = http.createServer(async (req, res) => {
       if (planAttempts === 1) { res.statusCode = 502; res.end(JSON.stringify({error:'模型服务暂时不可用'})); return; }
       const day = {writing:1,speaking:1,writingReview:1,writingRewrite:1,speakingReview:1,languageMinutes:15,reviewMinutes:30,note:'synthetic day'};
       const batch = JSON.parse(request.messages.at(-1).content);
-      const phases = [{days:batch.weekdays.map(weekday=>({...day,weekday}))}];
+      const phases = [{days:batch.weekdays.map((weekday,i)=>({...day,writing:0,writingRewrite:0,date:batch.dates[i],weekday,...(batch.dates[i]===batch.profile.examDate?{writing:0,speaking:0,writingReview:0,writingRewrite:0,speakingReview:0,languageMinutes:0,reviewMinutes:0}:{})}))}];
       res.end(JSON.stringify({content:JSON.stringify({summary:'synthetic retried plan',priorities:['review'],phases})}));
     }
     else { res.statusCode = 404; res.end('{}'); }
@@ -214,9 +214,9 @@ const server = http.createServer(async (req, res) => {
     assert.deepEqual(await page.locator('.manual-plan-values span').allTextContents(), ['新写作 1 篇','新口语 2 次','写作精改 1 次','重写 0 篇','口语回听 1 次','语料记忆 12 分钟','错题与单词 25 分钟']);
     await page.locator('#generateAiPlan').click();
     await page.waitForFunction(() => document.querySelector('#planResult').textContent.includes('AI 已生成覆盖'));
-    assert.equal(planAttempts,3,'two phases plus one bounded transient retry');
+    assert.equal(planAttempts,data.studyPlan.phases.length+1,'one request per calendar substage plus bounded transient retry');
     assert.equal(data.studyPlan.source,'ai');
-    assert.match(data.studyPlan.summary,/2 个阶段/);
+    assert.equal(data.studyPlan.scheduleVersion,2);
     await page.locator('#saveManualPlan').click();
     assert.equal(data.studyPlan.source,'manual','manual fixture is restored for the remaining plan interaction checks');
     await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-plan.png'), fullPage:true, animations:'disabled'});
