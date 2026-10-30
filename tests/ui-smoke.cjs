@@ -28,7 +28,7 @@ const server = http.createServer(async (req, res) => {
       planAttempts += 1;
       if (planAttempts === 1) { res.statusCode = 502; res.end(JSON.stringify({error:'模型服务暂时不可用'})); return; }
       const day = {writing:1,speaking:1,writingReview:1,writingRewrite:1,speakingReview:1,languageMinutes:15,reviewMinutes:30,note:'synthetic day'};
-      const batch = JSON.parse(request.messages[1].content);
+      const batch = JSON.parse(request.messages.at(-1).content);
       const phases = [{days:batch.weekdays.map(weekday=>({...day,weekday}))}];
       res.end(JSON.stringify({content:JSON.stringify({summary:'synthetic retried plan',priorities:['review'],phases})}));
     }

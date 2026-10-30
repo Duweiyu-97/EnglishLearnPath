@@ -101,8 +101,14 @@ try {
     const calls = [];
     let h;
     h = harness(undefined, undefined, async request => {
-      const input = JSON.parse(request.messages[1].content);
+      const input = JSON.parse(request.messages.at(-1).content);
       calls.push(input);
+      assert.equal(input.sharedContext.roadmap.length,input.phaseCount,'every batch knows all stage objectives');
+      assert.equal(input.completedPhases.length,input.phaseIndex,'every stage receives all confirmed previous stages');
+      assert.equal(input.precedingDays.length,input.weekdays[0]-1,'recursive split must retain all preceding weekdays');
+      assert.deepEqual(input.precedingDays.map(d=>d.weekday),Array.from({length:input.weekdays[0]-1},(_,i)=>i+1));
+      if (calls.length>1) assert.deepEqual(input.sharedContext,calls[0].sharedContext,'framework cannot drift on splits or retries');
+      input.completedPhases.forEach(p=>assert.deepEqual(p.days.map(d=>d.note),['1','2','3','4','5','6','7'],'carry exact confirmed results, not invented summaries'));
       if (scenario === 'changed') h.element('#planFocus').value = 'Changed while pending';
       if (scenario === 'progress') h.api.state.planProgress.newCheck = true;
       if (scenario === 'cancel') h.element('#cancelAiPlan').events.click();
@@ -156,7 +162,7 @@ try {
     const entered = new Promise(resolve => {enteredWrite=resolve;});
     let first=true;
     const h=harness(undefined,undefined, async request=>{
-      const {weekdays}=JSON.parse(request.messages[1].content);
+      const {weekdays}=JSON.parse(request.messages.at(-1).content);
       return {ok:true,json:async()=>({content:JSON.stringify({summary:'batch',priorities:[],phases:[{days:weekdays.map(weekday=>({weekday,writing:0,speaking:0,writingReview:0,writingRewrite:0,speakingReview:0,languageMinutes:10,reviewMinutes:30,note:'review'}))}]})})};
     },async()=>{if(first){first=false;enteredWrite();await new Promise(resolve=>{releaseWrite=resolve;});}});
     const exam=new Date();exam.setDate(exam.getDate()+1);
@@ -287,9 +293,9 @@ try {
   await h.api.reviewSpeaking();
   assert.equal(h.chatRequests.length, 2);
   for (const request of h.chatRequests) {
-    assert.match(request.messages[1].content, /现有水平（用户自述）：写作 5.5，口语 6.0/);
-    assert.match(request.messages[1].content, /目标水平（用户设定）：写作 7.0，口语 7.5/);
-    assert.match(request.messages[1].content, /论证与自然表达/);
+    assert.match(request.messages.at(-1).content, /现有水平（用户自述）：写作 5.5，口语 6.0/);
+    assert.match(request.messages.at(-1).content, /目标水平（用户设定）：写作 7.0，口语 7.5/);
+    assert.match(request.messages.at(-1).content, /论证与自然表达/);
     assert.doesNotMatch(request.messages[0].content, /6.0–6.5/);
     assert.doesNotMatch(request.messages[0].content, /批改原则补充|写作修订规则|口语修订规则/);
   }

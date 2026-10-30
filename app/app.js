@@ -503,7 +503,10 @@
       deadline = setTimeout(() => controller.abort(), 5 * 60 * 1000);
       let requests = 0;
       const maxRequests = 20;
-      async function batch(blueprint, weekdays, phaseIndex) {
+      const phases = [];
+      // Context is bounded by four seven-day templates, never conversation logs.
+      const sharedContext = {profile, roadmap:blueprints, rules:{reviewShare:0.4,lightDay:7,scope:["writing","speaking","review"]}};
+      async function batch(blueprint, weekdays, phaseIndex, precedingDays = []) {
         for (let attempt = 0; attempt < 2; attempt++) {
           checkCurrent(profile);
           if (requests >= maxRequests) throw new Error("已达到本次 20 次请求上限，原计划保持不变；请使用非思考模式模型后重试");
@@ -512,7 +515,8 @@
           const payload = {
             messages: [
               {role:"system", content:"你是写作与口语学习规划师。只输出 JSON：{summary:string,priorities:string[],phases:[{days:[]}]}，phases 只能有一项。仅生成指定阶段、指定 weekday 的任务，weekday 为周一 1 到周日 7，严格按指定顺序，每天恰好一次。每项含 weekday、writing、speaking、writingReview、writingRewrite、speakingReview、languageMinutes、reviewMinutes、note。所有数值是非负整数；writing、writingReview、writingRewrite、speakingReview 至多1，speaking至多2，languageMinutes至多60，reviewMinutes至多240。note至多50字，summary至多120字，priorities至多4条。不要输出解释或思考。只规划写作、口语及复盘，不安排其他科目。至少 40% 的可用时间安排给复盘、重练和语料记忆，任务量符合每日时间；周日安排轻量复盘。写作应包含精改、重写；口语应包含回听、重说。不要虚构诊断。"},
-              {role:"user", content:JSON.stringify({profile, phase:blueprint, phaseIndex, phaseCount:blueprints.length, weekdays})}
+              {role:"system",content:"衔接要求：sharedContext 是整个计划统一且不可改写的框架。completedPhases 和 precedingDays 是已确认内容，只能承接，不能重写或假设未提供的完成情况。根据后续 roadmap 阶段目标安排当前任务：基础、强化、冲刺逐步推进，不在冲刺期重新安排大量基础新课。拆分只改变本次输出范围，目标、术语、时间约束和训练重点保持一致；后半批承接前半批的写作精改、重写、口语重说与复盘，避免重复引入同一任务或无前序练习的孤立重练。后续阶段尚未生成，只能按其目标预留衔接，不能声称已知道其具体任务。"},
+              {role:"user", content:JSON.stringify({sharedContext,profile, phase:blueprint, phaseIndex, phaseCount:blueprints.length, weekdays,completedPhases:phases,precedingDays:precedingDays.map((day,i)=>({weekday:i+1,...day}))})}
             ], temperature:0, max_tokens:6000, output_contract:"study-plan-json-v1"
           };
           try {
@@ -545,8 +549,8 @@
             if (error.splitBatch) {
               if (weekdays.length === 1) throw new Error("单日任务仍达到输出上限，请改用非思考模式或更高额度模型；原计划保持不变");
               const middle = Math.floor(weekdays.length / 2);
-              const left = await batch(blueprint, weekdays.slice(0,middle), phaseIndex);
-              const right = await batch(blueprint, weekdays.slice(middle), phaseIndex);
+              const left = await batch(blueprint, weekdays.slice(0,middle), phaseIndex, precedingDays);
+              const right = await batch(blueprint, weekdays.slice(middle), phaseIndex, [...precedingDays,...left]);
               return [...left,...right];
             }
             if (attempt || (!error.planFormatFailure && !error.retryableAiFailure)) throw error;
@@ -554,12 +558,18 @@
           }
         }
       }
-      const phases = [];
       for (const [index, blueprint] of blueprints.entries()) {
         const days = await batch(blueprint, [1,2,3,4,5,6,7], index);
         if (days.length !== 7) throw new Error("阶段天数不完整，原计划保持不变");
         phases.push({...blueprint, days});
       }
+      let expectedStart = blueprints[0].startDate;
+      for (const phase of phases) {
+        if (phase.startDate !== expectedStart || phase.days.length !== 7 || phase.endDate < phase.startDate)
+          throw new Error("阶段日期不连续，原计划保持不变");
+        expectedStart = formatPlanDate(addPlanDays(phase.endDate,1));
+      }
+      if (phases.at(-1).endDate !== profile.examDate) throw new Error("计划未覆盖考试日期，原计划保持不变");
       const candidate = {source:"ai",createdAt:new Date().toISOString(),profile,
         summary:`从 ${blueprints[0].startDate} 到 ${profile.examDate}，共 ${totalDays} 天、${phases.length} 个阶段；每日约 ${profile.dailyMinutes} 分钟。`,
         priorities:profile.focus ? [profile.focus] : [],phases};
