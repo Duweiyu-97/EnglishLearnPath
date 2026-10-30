@@ -4,7 +4,7 @@ import vm from 'node:vm';
 
 const source = await readFile(new URL('../app/app.js', import.meta.url), 'utf8');
 const timers = new Set();
-function harness(initialState, localWhisper, planResponse) {
+function harness(initialState, localWhisper, planResponse, beforeWrite) {
   localWhisper ||= { status: async () => ({ready:true}), transcribe: async () => 'Local Whisper result.' };
   const elements = new Map();
   let persisted;
@@ -73,6 +73,7 @@ function harness(initialState, localWhisper, planResponse) {
         return { ok: true, json: async () => ({ content }) };
       }
       if (url === '/api/data' && options?.method === 'PUT') {
+        if (beforeWrite) await beforeWrite();
         if (failWrites) return { ok: false, json: async () => ({ error: 'test disk failure' }) };
         persisted = JSON.parse(options.body).data;
       }
@@ -81,7 +82,7 @@ function harness(initialState, localWhisper, planResponse) {
   });
   vm.runInContext(source.replace(/  initialize\(\);\s*\}\)\(\);\s*$/, `
     globalThis.api = { refreshTranscriptionStatus, transcribeLocalRecording, bindEvents, toggleRecording, saveWriting, saveSpeaking, loadSpeaking, newSpeaking, loadWriting, todayPlanTasks, normalizePlanDay, normalizeAiPlanDay, reviewWriting, reviewSpeaking, reviewLearnerContext, reviewTopicTitle, practiceTitle, generateLanguageBank, normalizeLanguageBank, languageBankSource,
-      generateAiPlan, buildPhaseBlueprints,
+      generateAiPlan, buildPhaseBlueprints, saveState,
       enableAi() { aiConnected = true; },
       get busy() { return recordingBusy; }, get blob() { return recordingBlob; }, get speakingPhase() { return speakingPhase; },
       get state() { return state; }, set state(value) { state = normalizeState(value); }
@@ -96,36 +97,85 @@ function harness(initialState, localWhisper, planResponse) {
 }
 
 try {
-  for (const scenario of ['length', 'legacy-length', 'always-length', 'auth']) {
-    const budgets = [];
-    let plan;
-    const h = harness(undefined, undefined, request => {
-      budgets.push(request.max_tokens);
-      if (budgets.length === 1 || scenario === 'always-length') return {ok:false,status:scenario === 'auth' ? 401 : 502,json:async () => ({code:scenario === 'legacy-length' ? undefined : 'AI_OUTPUT_LENGTH',error:'模型输出达到长度上限，尚未生成最终答案；这不是 API Key 无效的提示'})};
-      return {ok:true,json:async () => ({content:JSON.stringify(plan)})};
+  for (const scenario of ['days-0','days-9','days-10','days-29','days-30','days-89','days-90','normal','split','legacy','cap','always-length','auth','bad-fields','duplicate','transient','late-failure','disk','changed','progress','cancel','double','long-input']) {
+    const calls = [];
+    let h;
+    h = harness(undefined, undefined, async request => {
+      const input = JSON.parse(request.messages[1].content);
+      calls.push(input);
+      if (scenario === 'changed') h.element('#planFocus').value = 'Changed while pending';
+      if (scenario === 'progress') h.api.state.planProgress.newCheck = true;
+      if (scenario === 'cancel') h.element('#cancelAiPlan').events.click();
+      if (scenario === 'double') await h.api.generateAiPlan();
+      const truncate = scenario === 'always-length' || (['split','legacy'].includes(scenario) && input.weekdays.length > 3) || (scenario === 'cap' && input.weekdays.length > 1);
+      if (truncate || scenario === 'auth' || (scenario === 'late-failure' && input.phaseIndex === 1))
+        return {ok:false,status:scenario === 'auth' || scenario === 'late-failure' ? 401 : 502,json:async()=>({code:scenario === 'legacy' ? undefined : 'AI_OUTPUT_LENGTH',error:'模型输出达到长度上限；这不是 API Key 无效的提示'})};
+      if (scenario === 'transient' && calls.length === 1) return {ok:false,status:503,json:async()=>({error:'temporarily unavailable'})};
+      const days = input.weekdays.map(weekday=>({weekday,writing:0,speaking:1,writingReview:0,writingRewrite:0,speakingReview:1,languageMinutes:10,reviewMinutes:30,note:String(weekday)}));
+      if (scenario === 'bad-fields') days[0].writing = '1';
+      if (scenario === 'duplicate' && days.length > 1) days[1].weekday = days[0].weekday;
+      return {ok:true,json:async()=>({content:JSON.stringify({summary:'batch',priorities:[],phases:[{days}]})})};
     });
-    const exam = new Date(); exam.setDate(exam.getDate() + 180);
+    const exam = new Date(); exam.setDate(exam.getDate()+(scenario.startsWith('days-') ? Number(scenario.slice(5)) : 180));
     const date = `${exam.getFullYear()}-${String(exam.getMonth()+1).padStart(2,'0')}-${String(exam.getDate()).padStart(2,'0')}`;
-    h.element('#planExamDate').value = date;
-    h.element('#planCurrentLevel').value = '5.5'; h.element('#planTargetLevel').value = '7'; h.element('#planDailyMinutes').value = '90';
-    plan = {summary:'Recovered plan',priorities:[],phases:h.api.buildPhaseBlueprints(date).map(b => ({...b,days:Array.from({length:7},()=>({writing:0,speaking:1,writingReview:0,writingRewrite:0,speakingReview:1,languageMinutes:10,reviewMinutes:30,note:'Review'}))}))};
-    h.api.state.studyPlan = {summary:'Keep original'};
-    h.api.state.planProgress = {existing:true};
+    h.element('#planExamDate').value=date;
+    h.element('#planCurrentLevel').value='5.5'; h.element('#planTargetLevel').value='7'; h.element('#planDailyMinutes').value='90';
+    h.api.state.studyPlan={summary:'Keep original'}; h.api.state.planProgress={existing:true};
     h.api.enableAi();
+    if (scenario === 'disk') h.failWrites();
+    if (scenario === 'long-input') h.element('#planFocus').value='x'.repeat(2001);
     await h.api.generateAiPlan();
-    assert.deepEqual(budgets, scenario === 'auth' ? [6000] : [6000,8000]);
-    assert.equal(h.element('#generateAiPlan').disabled, false);
-    if (scenario === 'auth' || scenario === 'always-length') {
-      assert.equal(h.api.state.studyPlan.summary, 'Keep original');
-      assert.equal(h.api.state.planProgress.existing, true);
-      assert.equal(h.persisted(), undefined, 'failed generation must not write over old plan');
+    const success = scenario.startsWith('days-') || ['normal','split','legacy','transient','double'].includes(scenario);
+    assert.equal(h.element('#generateAiPlan').disabled,false,scenario);
+    assert.ok(calls.length<=20,scenario);
+    if (success) {
+      const saved=h.persisted().studyPlan;
+      assert.equal(saved.phases.length,h.api.buildPhaseBlueprints(date).length,scenario);
+      saved.phases.forEach((p,i)=>{
+        assert.deepEqual(p.days.map(d=>d.note),['1','2','3','4','5','6','7'],scenario);
+        assert.equal(p.startDate,h.api.buildPhaseBlueprints(date)[i].startDate);
+        assert.equal(p.endDate,h.api.buildPhaseBlueprints(date)[i].endDate);
+      });
+      assert.equal(saved.phases.at(-1).endDate,date);
+      if (scenario==='normal' || scenario==='double') assert.equal(calls.length,saved.phases.length);
+      if (scenario==='split') assert.deepEqual(calls.slice(0,5).map(c=>c.weekdays.length),[7,3,4,2,2]);
     } else {
-      assert.equal(h.persisted().studyPlan.summary, 'Recovered plan');
-      assert.equal(h.persisted().studyPlan.phases.length, plan.phases.length);
+      assert.equal(h.api.state.studyPlan.summary,'Keep original',scenario);
+      assert.equal(h.api.state.planProgress.existing,true,scenario);
+      if (scenario === 'progress') assert.equal(h.api.state.planProgress.newCheck,true);
+      assert.equal(h.persisted(),undefined,scenario);
+      if (scenario==='auth') assert.equal(calls.length,1);
+      if (scenario==='always-length') assert.equal(calls.length,3);
+      if (scenario==='cap') assert.equal(calls.length,20);
+      if (scenario==='long-input') assert.equal(calls.length,0);
     }
   }
 
+  for (const failCommit of [false,true]) {
+    let releaseWrite, enteredWrite;
+    const entered = new Promise(resolve => {enteredWrite=resolve;});
+    let first=true;
+    const h=harness(undefined,undefined, async request=>{
+      const {weekdays}=JSON.parse(request.messages[1].content);
+      return {ok:true,json:async()=>({content:JSON.stringify({summary:'batch',priorities:[],phases:[{days:weekdays.map(weekday=>({weekday,writing:0,speaking:0,writingReview:0,writingRewrite:0,speakingReview:0,languageMinutes:10,reviewMinutes:30,note:'review'}))}]})})};
+    },async()=>{if(first){first=false;enteredWrite();await new Promise(resolve=>{releaseWrite=resolve;});}});
+    const exam=new Date();exam.setDate(exam.getDate()+1);
+    h.element('#planExamDate').value=`${exam.getFullYear()}-${String(exam.getMonth()+1).padStart(2,'0')}-${String(exam.getDate()).padStart(2,'0')}`;
+    h.element('#planCurrentLevel').value='5';h.element('#planTargetLevel').value='7';h.element('#planDailyMinutes').value='90';
+    h.api.state.studyPlan={summary:'old'};h.api.state.planProgress={old:true};h.api.enableAi();
+    const generating=h.api.generateAiPlan();
+    await entered;
+    assert.equal(h.api.state.studyPlan.summary,'old','do not publish before disk ACK');
+    h.api.state.writings.push({id:'concurrent',essay:'saved while plan commits'});
+    const otherSave=h.api.saveState().catch(()=>{});
+    if(failCommit)h.failWrites();
+    releaseWrite();await generating;await otherSave;
+    if(failCommit){assert.equal(h.api.state.studyPlan.summary,'old');assert.equal(h.api.state.planProgress.old,true);}
+    else {assert.equal(h.persisted().studyPlan.source,'ai','queued save cannot restore old plan');assert.equal(h.persisted().writings[0].id,'concurrent');}
+  }
+
   let healthy = false;
+  console.log('Plan batching: date boundaries, split order, request cap, cancellation, conflicts, disk failure and concurrent save checks passed.');
   const recovery = harness(undefined, {status: async () => ({ready:healthy, error:'[WHISPER_CONNECTION] test service unavailable'}), transcribe: async () => 'Recovered transcript.'});
   await recovery.api.refreshTranscriptionStatus();
   assert.equal(recovery.element('#recordButton').disabled, false, 'failed startup check must not permanently disable recovery');

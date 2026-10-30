@@ -133,8 +133,8 @@
   function saveState(markActivity = false) {
     if (markActivity && !state.activityDates.includes(today())) state.activityDates.push(today());
     renderMetrics();
-    const snapshot = structuredClone(state);
     const task = saveQueue.catch(() => undefined).then(async () => {
+      const snapshot = structuredClone(state);
       const response = await fetch("/api/data", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -433,6 +433,7 @@
   }
 
   function saveManualPlan() {
+    if (planCommitting) return showToast("计划正在保存，请稍候");
     try {
       const profile = readPlanProfile();
       validatePlanProfile(profile);
@@ -471,88 +472,125 @@
     return JSON.parse(cleaned.slice(start, end + 1));
   }
 
+  let planGenerationController = null;
+  let planCommitting = false;
+
   async function generateAiPlan() {
     if (!aiConnected) return routeTo("settings");
-    const result = $("#planResult");
-    const button = $("#generateAiPlan");
+    if (planGenerationController) return;
+    const controller = new AbortController();
+    planGenerationController = controller;
+    const result = $("#planResult"), button = $("#generateAiPlan");
+    const originalPlan = JSON.stringify([state.studyPlan, state.planProgress]);
+    const originalState = state;
+    const checkCurrent = profile => {
+      if (controller.signal.aborted) throw new Error("已取消生成，原计划保持不变");
+      if (state !== originalState || JSON.stringify(readPlanProfile()) !== JSON.stringify(profile) ||
+          JSON.stringify([state.studyPlan, state.planProgress]) !== originalPlan)
+        throw new Error("生成期间计划条件或进度已改变，请重新生成；现有数据未替换");
+    };
+    let deadline;
     try {
       const profile = readPlanProfile();
       validatePlanProfile(profile);
+      if (profile.currentLevel.length > 200 || profile.targetLevel.length > 200 || profile.focus.length > 2000)
+        throw new Error("水平描述最多 200 字，重点与限制最多 2000 字；请精简后生成，不会自动删掉你的输入");
       const blueprints = buildPhaseBlueprints(profile.examDate);
       const totalDays = planDaysInclusive(today(), profile.examDate);
-      result.className = "feedback-box";
-      result.textContent = `AI 正在安排从今天到考试日的 ${totalDays} 天计划……`;
       button.disabled = true;
-      const payload = {
-        messages: [
-          { role: "system", content: "你是写作与口语学习规划师。只规划写作、口语及相关错题、词汇和语料复盘，不安排其他科目或外部题库任务。计划会分层展示：首页只汇总当天写作与口语是否完成；写作页和口语页分别展示各自细则。因此任务说明必须简短、可直接执行，不要把两个模块混成一个长段落。只输出一个 JSON 对象，不要 Markdown。结构必须为 {summary:string, priorities:string[], phases:[阶段项]}。summary 不超过 120 个汉字，priorities 最多 4 条。phases 数量和顺序必须与用户提供的阶段窗口完全一致。每个阶段项只含 name、focus、days；days 必须是周一到周日顺序的 7 项数组，每项必须含 writing、speaking、writingReview、writingRewrite、speakingReview、languageMinutes、reviewMinutes 七个非负整数和 note 字符串，note 不超过 50 个汉字。writing 每天只能为 0 或 1，speaking 每天最多 2；writingReview、writingRewrite、speakingReview 每项最多 1。至少 40% 的可用时间安排给复盘、重写或重说、语料记忆和错题回收，并安排轻量日或休息日。写作闭环是完成写作、核对批改、记录确定语法错误与可复用表达、重写、对照检查；口语闭环是录音转写、回听校对、核对批改、整理表达、重说同题。整体计划覆盖全部阶段直到考试日，任务量必须符合每日可用时间。不要虚构用户没有提供的诊断。" },
-          { role: "user", content: `今天：${today()}\n预计考试日期：${profile.examDate}\n计划总天数：${totalDays}\n现有水平：${profile.currentLevel}\n目标水平：${profile.targetLevel}\n每日时间：${profile.dailyMinutes} 分钟\n重点与限制：${profile.focus || "未补充"}\n固定阶段窗口：${JSON.stringify(blueprints)}\n请为每个阶段安排不同的训练重点和周一至周日执行节奏。` }
-        ],
-        temperature: 0,
-        max_tokens: 6000,
-        output_contract: "study-plan-json-v1"
-      };
-      let parsed, phases;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          let response;
+      $("#cancelAiPlan").disabled = false;
+      result.className = "feedback-box";
+      deadline = setTimeout(() => controller.abort(), 5 * 60 * 1000);
+      let requests = 0;
+      const maxRequests = 20;
+      async function batch(blueprint, weekdays, phaseIndex) {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          checkCurrent(profile);
+          if (requests >= maxRequests) throw new Error("已达到本次 20 次请求上限，原计划保持不变；请使用非思考模式模型后重试");
+          requests++;
+          result.textContent = `正在生成阶段 ${phaseIndex + 1}/${blueprints.length}：星期 ${weekdays.join("、")}（请求 ${requests}/${maxRequests}）……原计划尚未替换。`;
+          const payload = {
+            messages: [
+              {role:"system", content:"你是写作与口语学习规划师。只输出 JSON：{summary:string,priorities:string[],phases:[{days:[]}]}，phases 只能有一项。仅生成指定阶段、指定 weekday 的任务，weekday 为周一 1 到周日 7，严格按指定顺序，每天恰好一次。每项含 weekday、writing、speaking、writingReview、writingRewrite、speakingReview、languageMinutes、reviewMinutes、note。所有数值是非负整数；writing、writingReview、writingRewrite、speakingReview 至多1，speaking至多2，languageMinutes至多60，reviewMinutes至多240。note至多50字，summary至多120字，priorities至多4条。不要输出解释或思考。只规划写作、口语及复盘，不安排其他科目。至少 40% 的可用时间安排给复盘、重练和语料记忆，任务量符合每日时间；周日安排轻量复盘。写作应包含精改、重写；口语应包含回听、重说。不要虚构诊断。"},
+              {role:"user", content:JSON.stringify({profile, phase:blueprint, phaseIndex, phaseCount:blueprints.length, weekdays})}
+            ], temperature:0, max_tokens:6000, output_contract:"study-plan-json-v1"
+          };
           try {
-            response = await fetch("/api/ai/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+            let response;
+            try { response = await fetch("/api/ai/chat", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload),signal:controller.signal}); }
+            catch (error) { error.retryableAiFailure = error.name !== "AbortError"; throw error; }
+            const data = await response.json().catch(() => ({}));
+            checkCurrent(profile);
+            if (!response.ok) {
+              const error = new Error(data.error || `AI 服务错误（HTTP ${response.status}）`);
+              const auth = [401,403].includes(response.status);
+              error.splitBatch = !auth && (data.code === "AI_OUTPUT_LENGTH" || /输出达到长度上限|输出.*截断/.test(error.message));
+              error.retryableAiFailure = !auth && !/API\s*Key|鉴权|认证|余额|quota/i.test(error.message) && [408,425,429,500,502,503,504].includes(response.status);
+              throw error;
+            }
+            let days;
+            try {
+              const parsed = parseAiJson(data.content);
+              if (!Array.isArray(parsed.phases) || parsed.phases.length !== 1) throw new Error("阶段数量错误");
+              days = parsed.phases[0]?.days;
+              const limits = {writing:1,speaking:2,writingReview:1,writingRewrite:1,speakingReview:1,languageMinutes:60,reviewMinutes:240};
+              if (!Array.isArray(days) || days.length !== weekdays.length || days.some((day,i) =>
+                !day || day.weekday !== weekdays[i] || typeof day.note !== "string" || day.note.length > 50 ||
+                Object.entries(limits).some(([key,max]) => !Number.isInteger(day[key]) || day[key] < 0 || day[key] > max)))
+                throw new Error("日期、任务字段或数值不完整");
+            } catch (error) { error.planFormatFailure = true; throw error; }
+            return days.map(normalizeAiPlanDay);
           } catch (error) {
-            error.retryableAiFailure = true;
-            throw error;
+            checkCurrent(profile);
+            if (error.splitBatch) {
+              if (weekdays.length === 1) throw new Error("单日任务仍达到输出上限，请改用非思考模式或更高额度模型；原计划保持不变");
+              const middle = Math.floor(weekdays.length / 2);
+              const left = await batch(blueprint, weekdays.slice(0,middle), phaseIndex);
+              const right = await batch(blueprint, weekdays.slice(middle), phaseIndex);
+              return [...left,...right];
+            }
+            if (attempt || (!error.planFormatFailure && !error.retryableAiFailure)) throw error;
+            await new Promise(resolve => setTimeout(resolve, 500));
           }
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            const failure = new Error(data.error || `AI 计划生成失败（HTTP ${response.status}）`);
-            failure.outputLengthFailure = data.code === "AI_OUTPUT_LENGTH" || /(?:输出达到长度上限|输出.*截断)/.test(failure.message);
-            const authFailure = /(?:API\s*Key|鉴权|认证|未授权|unauthori[sz]ed|forbidden|余额|quota)/i.test(failure.message);
-            failure.retryableAiFailure = ![401, 403].includes(response.status) && (failure.outputLengthFailure || (!authFailure && [408, 425, 429, 500, 502, 503, 504].includes(response.status)));
-            throw failure;
-          }
-          parsed = parseAiJson(data.content);
-          if (!Array.isArray(parsed.phases) || parsed.phases.length !== blueprints.length) throw new Error("AI 返回的阶段数量与考试日期安排不一致");
-          phases = blueprints.map((blueprint, index) => {
-            const generated = parsed.phases[index] || {};
-            if (!Array.isArray(generated.days) || generated.days.length !== 7) throw new Error(`AI 返回的“${blueprint.name}”阶段没有完整七天执行节奏`);
-            const requiredDayFields = ["writing", "speaking", "writingReview", "writingRewrite", "speakingReview", "languageMinutes", "reviewMinutes", "note"];
-            if (generated.days.some(day => !day || typeof day !== "object" || Array.isArray(day) || requiredDayFields.some(field => !Object.hasOwn(day, field)))) throw new Error(`AI 返回的“${blueprint.name}”阶段缺少每日必需字段`);
-            return {
-              ...blueprint,
-              name: typeof generated.name === "string" ? generated.name.slice(0, 80) : blueprint.name,
-              focus: typeof generated.focus === "string" ? generated.focus.slice(0, 600) : blueprint.focus,
-              days: generated.days.map(normalizeAiPlanDay)
-            };
-          });
-          break;
-        } catch (error) {
-          const formatFailure = /(?:JSON|格式|字段|数组|阶段|七天|执行节奏|网页报告)/i.test(error.message);
-          if (attempt || (!formatFailure && !error.retryableAiFailure)) throw error;
-          if (error.outputLengthFailure || formatFailure) payload.max_tokens = 8000;
-          result.textContent = formatFailure ? "AI 首次返回的计划结构不完整，正在自动重试一次……" : "AI 服务首次响应不稳定，正在自动重试一次……";
-          if (error.outputLengthFailure) result.textContent = "AI 输出额度不足，正在提高额度并自动重试一次；原计划保持不变……";
-          if (!formatFailure) await new Promise(resolve => setTimeout(resolve, 500));
         }
       }
-      state.studyPlan = {
-        source: "ai",
-        createdAt: new Date().toISOString(),
-        profile,
-        summary: typeof parsed.summary === "string" && parsed.summary.trim() ? parsed.summary.slice(0, 1200) : `AI 已生成从今天到 ${profile.examDate} 的考前计划`,
-        priorities: Array.isArray(parsed.priorities) ? parsed.priorities.filter(item => typeof item === "string" && item.trim()).map(item => item.slice(0, 240)).slice(0, 8) : [],
-        phases
-      };
-      state.planProgress = {};
-      await saveState();
-      renderStudyPlan();
-      renderTodayPlan();
+      const phases = [];
+      for (const [index, blueprint] of blueprints.entries()) {
+        const days = await batch(blueprint, [1,2,3,4,5,6,7], index);
+        if (days.length !== 7) throw new Error("阶段天数不完整，原计划保持不变");
+        phases.push({...blueprint, days});
+      }
+      const candidate = {source:"ai",createdAt:new Date().toISOString(),profile,
+        summary:`从 ${blueprints[0].startDate} 到 ${profile.examDate}，共 ${totalDays} 天、${phases.length} 个阶段；每日约 ${profile.dailyMinutes} 分钟。`,
+        priorities:profile.focus ? [profile.focus] : [],phases};
+      checkCurrent(profile);
+      // Serialize with all ordinary saves. Publish to memory only after disk ACK.
+      planCommitting = true;
+      $("#cancelAiPlan").disabled = true;
+      clearTimeout(deadline);
+      const commit = saveQueue.catch(() => undefined).then(async () => {
+        checkCurrent(profile);
+        const snapshot = structuredClone({...state,studyPlan:candidate,planProgress:{}});
+        const response = await fetch("/api/data", {method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:snapshot})});
+        const saved = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(saved.error || "计划保存失败，原计划保持不变");
+        state.studyPlan = candidate;
+        state.planProgress = {};
+        updateDiskStatus(saved.storage);
+      });
+      saveQueue = commit.catch(() => undefined);
+      await commit;
+      renderStudyPlan(); renderTodayPlan(); renderMetrics();
       result.textContent = `AI 已生成覆盖 ${totalDays} 天、共 ${phases.length} 个阶段的考前计划，并永久写入本地数据文件。`;
       showToast("考前学习计划已生成");
     } catch (error) {
       result.className = "feedback-box is-error";
-      result.textContent = `生成失败：${error.message}`;
+      result.textContent = `生成失败：${controller.signal.aborted ? "已取消或超过 5 分钟，原计划保持不变" : error.message}`;
     } finally {
+      clearTimeout(deadline);
+      planGenerationController = null; planCommitting = false;
       button.disabled = !aiConnected;
+      $("#cancelAiPlan").disabled = true;
     }
   }
 
@@ -678,6 +716,7 @@
     root.className = "today-task-list";
     root.innerHTML = tasks.map(task => `<article class="today-task ${progress[task.id] ? "is-done" : ""}"><input type="checkbox" data-plan-check="${task.id}" ${progress[task.id] ? "checked" : ""} aria-label="标记完成"><div><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.detail)}</small></div><button class="button button-secondary" data-plan-start="${task.id}">开始</button></article>`).join("");
     $$('[data-plan-check]', root).forEach(box => box.addEventListener("change", () => {
+      if (planCommitting) { box.checked = !box.checked; return; }
       state.planProgress[today()] ||= {};
       state.planProgress[today()][box.dataset.planCheck] = box.checked;
       saveState(box.checked);
@@ -703,6 +742,7 @@
       root.className = "overview-plan-list";
       root.innerHTML = `${target?.phaseName ? `<p class="overview-phase-note"><strong>${escapeHtml(target.phaseName)}</strong>${escapeHtml(target.note || "按今天的数量完成练习，并为复盘留出时间。")}</p>` : ""}${selected.map(task => `<label class="overview-plan-item ${progress[task.id] ? "is-complete" : ""}"><input type="checkbox" data-overview-plan-check="${escapeHtml(task.id)}" ${progress[task.id] ? "checked" : ""}><div><strong>${escapeHtml(task.title)}</strong><small>${escapeHtml(task.detail)}</small></div></label>`).join("")}`;
       $$('[data-overview-plan-check]', root).forEach(box => box.addEventListener("change", () => {
+        if (planCommitting) { box.checked = !box.checked; return; }
         state.planProgress[today()] ||= {};
         state.planProgress[today()][box.dataset.overviewPlanCheck] = box.checked;
         saveState(box.checked);
@@ -2310,6 +2350,7 @@
   }
 
   async function importBackup(file) {
+    if (planGenerationController) return showToast("请先取消计划生成，再导入备份");
     if (!file) return;
     try {
       const parsed = JSON.parse(await file.text());
@@ -2326,6 +2367,7 @@
   }
 
   async function selectDataDirectory() {
+    if (planGenerationController) return showToast("请先取消计划生成，再切换数据目录");
     const resultBox = $("#storageResult");
     resultBox.className = "feedback-box";
     resultBox.textContent = "请在弹出的系统窗口中选择长期保存数据的文件夹……";
@@ -3170,8 +3212,10 @@
     $("#generateLanguageBank").addEventListener("click", generateLanguageBank);
     $$('[data-language-tab]').forEach(button => button.addEventListener("click", () => selectLanguageBankTab(button.dataset.languageTab)));
     $("#saveManualPlan").addEventListener("click", saveManualPlan);
+    $("#cancelAiPlan").addEventListener("click", () => { if (!planCommitting) planGenerationController?.abort(); });
     $("#generateAiPlan").addEventListener("click", generateAiPlan);
     $("#deletePlan").addEventListener("click", () => {
+      if (planCommitting) return showToast("计划正在保存，请稍候");
       if (!confirm("确定删除当前学习计划和全部计划打卡吗？练习记录与错题本不会删除。")) return;
       state.studyPlan = null;
       state.planProgress = {};
@@ -3230,6 +3274,7 @@
     $("#openDataDirectory").addEventListener("click", openDataDirectory);
     $("#writeDataNow").addEventListener("click", writeDataNow);
     $("#clearData").addEventListener("click", async () => {
+      if (planGenerationController) return showToast("请先取消计划生成，再清空数据");
       if (!confirm("这会清空当前永久数据文件中的所有学习记录。程序会保留最近备份，但仍建议先导出。确定继续吗？")) return;
       state = structuredClone(DEFAULT_STATE);
       activeWritingId = activeSpeakingId = null;

@@ -77,3 +77,4 @@ When the user corrects an implementation or workflow, fix the current issue and 
 [WORKFLOW] Keep the README screenshot gallery to one or two representative, polished product views; remove obsolete or anomalous screenshots instead of documenting every page.
 [WORKFLOW] A user-triggered AI action may automatically retry one provider-format failure; never require repeated clicks, and never overwrite saved data until a fully validated response succeeds.
 [WORKFLOW] Cross-platform support and every release must preserve the existing Windows launcher, DPAPI storage, Whisper build, package contents, and behavior; isolate platform implementations and require both full Windows and macOS CI jobs to succeed before creating a release.
+[ARCH] Long AI generation must use bounded batches and shrink truncated tasks rather than only increasing token limits; validate ordering and completeness, cap retries, and commit only complete results without overwriting concurrent user changes.

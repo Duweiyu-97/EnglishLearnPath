@@ -28,7 +28,8 @@ const server = http.createServer(async (req, res) => {
       planAttempts += 1;
       if (planAttempts === 1) { res.statusCode = 502; res.end(JSON.stringify({error:'模型服务暂时不可用'})); return; }
       const day = {writing:1,speaking:1,writingReview:1,writingRewrite:1,speakingReview:1,languageMinutes:15,reviewMinutes:30,note:'synthetic day'};
-      const phases = ['重点强化','冲刺与调整'].map(name => ({name,focus:'synthetic focus',days:Array.from({length:7},()=>({...day}))}));
+      const batch = JSON.parse(request.messages[1].content);
+      const phases = [{days:batch.weekdays.map(weekday=>({...day,weekday}))}];
       res.end(JSON.stringify({content:JSON.stringify({summary:'synthetic retried plan',priorities:['review'],phases})}));
     }
     else { res.statusCode = 404; res.end('{}'); }
@@ -213,9 +214,9 @@ const server = http.createServer(async (req, res) => {
     assert.deepEqual(await page.locator('.manual-plan-values span').allTextContents(), ['新写作 1 篇','新口语 2 次','写作精改 1 次','重写 0 篇','口语回听 1 次','语料记忆 12 分钟','错题与单词 25 分钟']);
     await page.locator('#generateAiPlan').click();
     await page.waitForFunction(() => document.querySelector('#planResult').textContent.includes('AI 已生成覆盖'));
-    assert.equal(planAttempts,2,'one plan action retries one transient DeepSeek response automatically');
+    assert.equal(planAttempts,3,'two phases plus one bounded transient retry');
     assert.equal(data.studyPlan.source,'ai');
-    assert.equal(data.studyPlan.summary,'synthetic retried plan');
+    assert.match(data.studyPlan.summary,/2 个阶段/);
     await page.locator('#saveManualPlan').click();
     assert.equal(data.studyPlan.source,'manual','manual fixture is restored for the remaining plan interaction checks');
     await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-plan.png'), fullPage:true, animations:'disabled'});
