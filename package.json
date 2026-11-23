@@ -1,7 +1,7 @@
 {
   "name": "english-learn-path-checks",
   "private": true,
-  "version": "0.7.4",
+  "version": "0.7.5",
   "scripts": {
     "test": "npm run test:logic && npm run test:browser",
     "test:logic": "node --check app/app.js && node --check app/whisper.js && node tests/static-smoke.mjs && node tests/plan-date-alignment.mjs && node tests/speaking-writing-regression.mjs && node tests/whisper-client-regression.mjs && node tests/macos-platform-smoke.mjs",

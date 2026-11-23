@@ -10,8 +10,37 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 jobs:
+  gate:
+    name: Select one verification run for a release commit
+    runs-on: ubuntu-latest
+    outputs:
+      run_build: ${{ steps.select.outputs.run_build }}
+    steps:
+      - name: Checkout refs
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Let the release tag own verification
+        id: select
+        shell: bash
+        run: |
+          run_build=true
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            if git tag --points-at "$GITHUB_SHA" --list 'v*' | grep -q .; then
+              run_build=false
+              echo "The matching release tag owns full verification and publication."
+            fi
+          fi
+          echo "run_build=$run_build" >> "$GITHUB_OUTPUT"
+
   build:
+    needs: gate
+    if: needs.gate.outputs.run_build == 'true'
     # build-whisper.ps1 uses the Visual Studio 17 2022 generator.
     # windows-latest can migrate to a newer VS major without that toolchain.
     runs-on: windows-2022
