@@ -9,6 +9,7 @@ let bound = true;
 let data = { writings: [], speaking: [], mistakes: [] };
 let planAttempts = 0;
 let failNotebookSave = false;
+let aiStatusDelay = 0;
 const server = http.createServer(async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   if (req.url.startsWith('/api/')) {
@@ -20,7 +21,10 @@ const server = http.createServer(async (req, res) => {
         data = JSON.parse(body).data;
       }
       res.end(JSON.stringify({ data, storage: { bound, ready: bound, fileExists: false } }));
-    } else if (req.url === '/api/ai/status') res.end(JSON.stringify({ connected: true, model: 'synthetic-deepseek' }));
+    } else if (req.url === '/api/ai/status') {
+      if (aiStatusDelay) await new Promise(resolve => setTimeout(resolve, aiStatusDelay));
+      res.end(JSON.stringify({ connected: true, model: 'synthetic-deepseek' }));
+    }
     else if (req.url === '/api/ai/chat' && req.method === 'POST') {
       let body = ''; for await (const chunk of req) body += chunk;
       const request = JSON.parse(body);
@@ -44,7 +48,7 @@ const server = http.createServer(async (req, res) => {
 });
 (async () => {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  const browser = await chromium.launch({ channel: process.env.ELP_BROWSER_CHANNEL === 'bundled' ? undefined : 'chrome', headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
     const errors = [];
@@ -94,7 +98,7 @@ const server = http.createServer(async (req, res) => {
     assert.match(await page.locator('#languageBankDetail').textContent(),/however.*然而/s,'known object-shaped language is normalized');
     assert.doesNotMatch(await page.locator('#languageBankDetail').textContent(),/\[object Object\]|unexpected|nested/,'unknown object-shaped language is discarded');
     await page.locator('.nav-item[data-route="home"]').click();
-    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-home.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(require('node:os').tmpdir(), 'elp-home.png'), fullPage:true, animations:'disabled'});
     data.writings = [
       {id:'task-one',type:'Task 1 Academic',minutes:20,prompt:'Describe a chart.',essay:'A chart response.',review:'Reviewed',status:'completed',updatedAt:'2026-09-08T10:00:00Z'},
       {id:'task-two',type:'Task 2',minutes:40,prompt:'Discuss public transport.',essay:'An essay response.',status:'completed',updatedAt:'2026-09-09T10:00:00Z'}
@@ -123,7 +127,7 @@ const server = http.createServer(async (req, res) => {
     await page.locator('[data-writing-type="Task 1 Academic"]').click();
     assert.equal(await page.locator('#writingMinutes').inputValue(), '20');
     assert.equal(await page.locator('#writingTimer').textContent(), '20:00');
-    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-writing.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(require('node:os').tmpdir(), 'elp-writing.png'), fullPage:true, animations:'disabled'});
     await page.locator('[data-writing-type="Task 2"]').click();
     assert.equal(await page.locator('#writingMinutes').inputValue(), '40');
     await page.locator('#writingPrompt').fill('Discuss whether public transport should be free.');
@@ -134,7 +138,7 @@ const server = http.createServer(async (req, res) => {
     assert.match(await page.locator('#writingSessionQuestion').textContent(), /public transport/);
     await page.locator('#writingEssay').fill("One, two! 2026 7.5 don't well-known.");
     assert.equal(await page.locator('#wordCount').textContent(), '4', 'letters count as words while numbers and punctuation do not');
-    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-writing-session.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(require('node:os').tmpdir(), 'elp-writing-session.png'), fullPage:true, animations:'disabled'});
     await page.locator('#toggleTimer').click();
     assert.equal(await page.locator('#writingEssay').evaluate(node => node.readOnly), true, 'pausing locks answer editing');
     const pausedAnswer = await page.locator('#writingEssay').inputValue();
@@ -191,7 +195,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.locator('#recordButton').textContent(), '开始 1 分钟准备');
     assert.match(await page.locator('#speakingPartGuide').textContent(), /准备 1 分钟.*2 分钟/);
     await page.locator('#speakingPart').selectOption('p1');
-    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-speaking.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(require('node:os').tmpdir(), 'elp-speaking.png'), fullPage:true, animations:'disabled'});
     await page.locator('.nav-item[data-route="plan"]').click();
     assert.equal(await page.locator('#manualListening, #manualReading').count(), 0);
     assert.equal(await page.locator('.manual-targets input').count(), 7);
@@ -219,7 +223,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(data.studyPlan.scheduleVersion,2);
     await page.locator('#saveManualPlan').click();
     assert.equal(data.studyPlan.source,'manual','manual fixture is restored for the remaining plan interaction checks');
-    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-plan.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(require('node:os').tmpdir(), 'elp-plan.png'), fullPage:true, animations:'disabled'});
     await page.locator('.nav-item[data-route="writing"]').click();
     const writingPlanCheck = page.locator('#writingOverviewPlan [data-overview-plan-check]').first();
     await writingPlanCheck.check();
@@ -232,7 +236,7 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.locator('#todayPlanSummary .today-module-summary').count(), 2, 'home shows only writing and speaking completion summaries');
     assert.deepEqual(await page.locator('#todayPlanSummary .today-module-summary strong').allTextContents(), ['1/2','1/3'], 'module completion clicks update the home summary');
     assert.equal(await page.locator('#todayPlanDetails').getAttribute('open'), null, 'task details stay collapsed by default');
-    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-home-with-plan.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(require('node:os').tmpdir(), 'elp-home-with-plan.png'), fullPage:true, animations:'disabled'});
     await page.locator('.nav-item[data-route="mistakes"]').click();
     assert.equal(await page.locator('select#mistakeModule').count(), 0);
     assert.deepEqual(await page.locator('[data-mistake-module]').evaluateAll(buttons => buttons.map(b => b.dataset.mistakeModule)), ['writing','speaking','vocabulary']);
@@ -286,7 +290,7 @@ const server = http.createServer(async (req, res) => {
     }
     await page.setViewportSize({width:1440,height:1050});
     await page.locator('#revealVocabularyAnswer').click();
-    await page.screenshot({path:path.join(process.env.TEMP || root,'elp-vocabulary-study.png'),fullPage:true,animations:'disabled'});
+    await page.screenshot({path:path.join(require('node:os').tmpdir(),'elp-vocabulary-study.png'),fullPage:true,animations:'disabled'});
     await page.locator('#vocabularyKnown').click();
     await page.waitForFunction(() => document.querySelector('#vocabularyStudyStatus').textContent.includes('本轮完成'));
     const learned = data.mistakes.find(item => item.module === 'vocabulary').vocabularyReview;
@@ -314,10 +318,13 @@ const server = http.createServer(async (req, res) => {
     await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
     const shortPageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
     data.mistakes.push(...Array.from({length:40}, (_, index) => ({id:`long-note-${index}`,module:'writing',title:`Practice ${index}`,text:'Review the original answer and explain the correction.\n'.repeat(12),createdAt:'2026-09-10T10:00:00Z'})));
+    aiStatusDelay = 500;
     await page.reload();
     await page.waitForFunction(() => document.querySelector('#mistakeCount').textContent === '43');
+    await page.locator('.page[data-page="mistakes"].is-active').waitFor({state:'visible'});
     await page.evaluate(() => document.getAnimations().forEach(animation => animation.finish()));
     assert.ok(await page.evaluate(() => document.documentElement.scrollHeight) <= shortPageHeight, 'adding notebook records must not extend the page');
+    aiStatusDelay = 0;
     for (const width of [1440,780,390]) {
       await page.setViewportSize({width,height:1050});
       const layout = await page.evaluate(() => {
@@ -333,11 +340,11 @@ const server = http.createServer(async (req, res) => {
     }
     await page.setViewportSize({width:1440,height:1050});
     await page.evaluate(() => { document.querySelector('.mistake-library-scroll').scrollTop=0; window.scrollTo(0,0); });
-    await page.screenshot({path:path.join(process.env.TEMP || root,'elp-notebook-scroll.png'),fullPage:true,animations:'disabled'});
+    await page.screenshot({path:path.join(require('node:os').tmpdir(),'elp-notebook-scroll.png'),fullPage:true,animations:'disabled'});
     bound = false;
     await page.reload();
     await page.locator('#storageOnboarding').waitFor({state:'visible'});
-    await page.screenshot({path:path.join(process.env.TEMP || root, 'elp-storage.png'), fullPage:true, animations:'disabled'});
+    await page.screenshot({path:path.join(require('node:os').tmpdir(), 'elp-storage.png'), fullPage:true, animations:'disabled'});
     assert.deepEqual(errors, []);
     console.log('UI regression passed; refreshed screenshots contain no user records or paths.');
   } finally { await browser.close(); server.close(); }

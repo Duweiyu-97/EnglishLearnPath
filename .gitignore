@@ -1,5 +1,6 @@
 # Build output
 /dist/
+/node_modules/
 /dist-test/
 /release/
 /launcher/EnglishLearnPath*

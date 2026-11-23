@@ -93,6 +93,8 @@ Windows 的每个解压目录都是相互隔离的便携副本。首次运行后
 
 ## 开发与构建
 
+固定回归范围、日期故障复现、双平台环境和通过标准见 [测试规范](docs/TEST_PLAN.md)。规范直接在 GitHub 网页编辑维护；两平台 Actions 执行相同的原版功能回归。开发者可选运行 npm test，使用合成数据与模拟 AI，不读取个人学习记录。
+
 前端位于 `app/`，使用原生 HTML/CSS/JavaScript，无 npm 运行时依赖。`launcher/` 是仅使用 Go 标准库的本地启动器、本地文件存储和 AI 代理；完整包还会从 `launcher/cmd/stopper` 构建独立的后台服务结束工具。
 
 开发者运行源码需要 Go 1.22+；构建完整包还需 CMake，以及对应系统的 C/C++ 工具链（GitHub Actions 已提供）：

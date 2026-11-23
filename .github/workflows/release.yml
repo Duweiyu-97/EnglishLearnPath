@@ -26,6 +26,24 @@ jobs:
           go-version: "1.22.x"
           cache-dependency-path: launcher/go.mod
 
+      - name: Set up browser test runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Run original interface browser regression
+        shell: pwsh
+        env:
+          ELP_BROWSER_CHANNEL: bundled
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency install failed' }
+          npx playwright install chromium
+          if ($LASTEXITCODE -ne 0) { throw 'Test browser install failed' }
+          npm run test:browser
+          if ($LASTEXITCODE -ne 0) { throw 'Original interface regression failed' }
+
       - name: Check static app
         shell: pwsh
         run: |
@@ -39,6 +57,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Platform smoke test failed' }
           node tests/speaking-writing-regression.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Practice regression test failed' }
+          node tests/plan-date-alignment.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Date alignment regression failed' }
           node tests/whisper-client-regression.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Whisper client regression test failed' }
 
@@ -109,11 +129,27 @@ jobs:
           path: ~/Library/Caches/EnglishLearnPath-build
           key: english-learn-path-whisper-macos-371b5a7561823ab2bb32142d2751e35e7534727b-small-en
 
+      - name: Set up browser test runtime
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Run original interface browser regression
+        shell: bash
+        env:
+          ELP_BROWSER_CHANNEL: bundled
+        run: |
+          npm ci
+          npx playwright install chromium
+          npm run test:browser
+
       - name: Check macOS launcher
         shell: bash
         run: |
           node tests/static-smoke.mjs
           node tests/speaking-writing-regression.mjs
+          node tests/plan-date-alignment.mjs
           node tests/whisper-client-regression.mjs
           node tests/macos-platform-smoke.mjs
           find launcher -name '*.go' -print0 | xargs -0 gofmt -w

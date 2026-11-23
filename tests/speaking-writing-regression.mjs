@@ -82,7 +82,7 @@ function harness(initialState, localWhisper, planResponse, beforeWrite) {
   });
   vm.runInContext(source.replace(/  initialize\(\);\s*\}\)\(\);\s*$/, `
     globalThis.api = { refreshTranscriptionStatus, transcribeLocalRecording, bindEvents, toggleRecording, saveWriting, saveSpeaking, loadSpeaking, newSpeaking, loadWriting, todayPlanTasks, normalizePlanDay, normalizeAiPlanDay, reviewWriting, reviewSpeaking, reviewLearnerContext, reviewTopicTitle, practiceTitle, generateLanguageBank, normalizeLanguageBank, languageBankSource,
-      generateAiPlan, buildPhaseBlueprints, buildCalendarBlueprints, planDayForDate, saveState,
+      generateAiPlan, buildPhaseBlueprints, buildCalendarBlueprints, planDayForDate, saveState, fitAiPlanDayBudget, finishWritingSession,
       enableAi() { aiConnected = true; },
       get busy() { return recordingBusy; }, get blob() { return recordingBlob; }, get speakingPhase() { return speakingPhase; },
       get state() { return state; }, set state(value) { state = normalizeState(value); }
@@ -97,6 +97,34 @@ function harness(initialState, localWhisper, planResponse, beforeWrite) {
 }
 
 try {
+  const budget = harness();
+  const explicit = budget.api.normalizeAiPlanDay({ writing:1, writingReview:1, writingRewrite:0, speakingReview:0, languageMinutes:15, reviewMinutes:20 });
+  assert.equal(explicit.writingRewrite, 0, 'an explicit zero must not become an extra task');
+  assert.equal(explicit.writing*40+explicit.writingReview*10+explicit.languageMinutes+explicit.reviewMinutes,85);
+  const fitted = budget.api.fitAiPlanDayBudget(budget.api.normalizeAiPlanDay({writing:1,writingReview:1,writingRewrite:1,languageMinutes:10,reviewMinutes:20}),90);
+  assert.equal(fitted.reviewMinutes,15);
+  assert.equal(fitted.writingRewrite,1,'fitting only adjusts flexible review time');
+  assert.throws(()=>budget.api.fitAiPlanDayBudget(budget.api.normalizeAiPlanDay({writing:1,speaking:2,writingReview:1,writingRewrite:1,speakingReview:1,languageMinutes:10,reviewMinutes:20}),90),/超过每日/);
+  const firstFailure = harness();
+  firstFailure.element('#writingPrompt').value='Synthetic question';
+  firstFailure.element('#writingEssay').value='Synthetic answer';
+  firstFailure.failWrites();
+  await firstFailure.api.finishWritingSession();
+  assert.equal(firstFailure.api.state.writings[0].status,'draft','failed body save cannot complete a session');
+  let writes=0;
+  const lastFailure=harness(undefined,undefined,undefined,()=>{ if(++writes===2)throw new Error('synthetic completion failure'); });
+  lastFailure.element('#writingPrompt').value='Synthetic question';
+  lastFailure.element('#writingEssay').value='Synthetic answer';
+  await lastFailure.api.finishWritingSession();
+  assert.equal(lastFailure.api.state.writings[0].status,'draft','failed completion write must roll back status');
+  assert.ok(!lastFailure.api.state.writings[0].finishedAt);
+  assert.equal(lastFailure.persisted().writings[0].status,'draft');
+  const completed=harness({writings:[{id:'completed',type:'Task 2',minutes:40,prompt:'Synthetic question',essay:'Original answer',status:'completed',finishedAt:'2026-01-01T12:00:00Z'}],speaking:[],mistakes:[]});
+  await completed.api.loadWriting('completed');
+  completed.element('#writingEssay').value='Edited answer';
+  assert.equal(await completed.api.saveWriting({silent:true}),true);
+  assert.equal(completed.persisted().writings[0].finishedAt,'2026-01-01T12:00:00Z');
+
   for (const scenario of ['days-0','days-9','days-10','days-29','days-30','days-89','days-90','days-365','days-730','days-1095','normal','split','legacy','cap','always-length','auth','bad-fields','duplicate','transient','late-failure','disk','changed','progress','cancel','double','long-input']) {
     const calls = [];
     let h;
@@ -119,7 +147,7 @@ try {
       if (scenario === 'transient' && calls.length === 1) return {ok:false,status:503,json:async()=>({error:'temporarily unavailable'})};
       const days = input.weekdays.map((weekday,i)=>({weekday,date:input.dates[i],writing:0,speaking:input.dates[i]===date?0:1,writingReview:0,writingRewrite:0,speakingReview:input.dates[i]===date?0:1,languageMinutes:input.dates[i]===date?0:10,reviewMinutes:input.dates[i]===date?0:30,note:String(weekday)}));
       if (scenario === 'bad-fields') days[0].writing = '1';
-      if (scenario === 'duplicate' && days.length > 1) days[1].weekday = days[0].weekday;
+      if (scenario === 'duplicate' && days.length > 1) days[1].date = days[0].date;
       return {ok:true,json:async()=>({content:JSON.stringify({summary:'batch',priorities:[],phases:[{days}]})})};
     });
     const exam = new Date(); exam.setDate(exam.getDate()+(scenario.startsWith('days-') ? Number(scenario.slice(5)) : 180));

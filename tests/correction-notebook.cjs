@@ -3,6 +3,7 @@ const { chromium } = require('playwright');
 const http = require('node:http');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const screenshotRoot = require('node:os').tmpdir();
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..', 'app');
 const writing = 'I likes cycling. He go home. UNRELATED FULL PARAGRAPH.';
@@ -39,7 +40,7 @@ const server = http.createServer(async (req, res) => {
 });
 (async () => {
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-  const browser=await chromium.launch({channel:'chrome',headless:true});
+  const browser=await chromium.launch({channel:process.env.ELP_BROWSER_CHANNEL === 'bundled' ? undefined : 'chrome',headless:true});
   try {
     const page=await browser.newPage({viewport:{width:1440,height:1000}});
     const errors=[], external=[];
@@ -50,7 +51,7 @@ const server = http.createServer(async (req, res) => {
     await page.locator('.correction-save').first().waitFor();
     assert.equal(await page.locator('#addWritingMistake, #addSpeakingMistake').count(),0);
     assert.equal(await page.locator('.correction-save').count(),2,'only source-matched corrections can be collected');
-    await page.locator('#reviewCorrectionsSection').screenshot({path:path.join(process.env.TEMP,'elp-corrections-compact.png'),animations:'disabled'});
+    await page.locator('#reviewCorrectionsSection').screenshot({path:path.join(screenshotRoot,'elp-corrections-compact.png'),animations:'disabled'});
     failWrites=true;
     await page.locator('.correction-save').first().click();
     await page.waitForFunction(() => document.querySelector('.correction-save').textContent.includes('重试'));
@@ -100,11 +101,12 @@ const server = http.createServer(async (req, res) => {
     assert.equal(await page.locator('#correctionStudyAttempt').inputValue(),'');
     await page.locator('#correctionStudyAttempt').fill('She goes home.');
     await page.locator('#revealCorrectionAnswer').click();
-    await page.screenshot({path:path.join(process.env.TEMP,'elp-correction-study.png'),fullPage:true,animations:'disabled'});
+    await page.screenshot({path:path.join(screenshotRoot,'elp-correction-study.png'),fullPage:true,animations:'disabled'});
     await page.locator('[data-correction-rating="good"]').click();
     await page.waitForFunction(() => document.querySelector('#correctionStudySummary').textContent.includes('本轮已完成 2'));
     assert.equal(data.mistakes.find(item=>item.id===speakingNote.id).correctionReview.level,1);
     await page.reload();
+    await page.locator('.page[data-page="mistakes"].is-active').waitFor();
     await page.locator('#startCorrectionStudy').waitFor({state:'attached'});
     assert.equal(await page.locator('#startCorrectionStudy').isDisabled(),true);
     assert.deepEqual(data.mistakes.find(item=>item.id==='legacy'),legacy,'legacy notes remain untouched');
@@ -113,7 +115,7 @@ const server = http.createServer(async (req, res) => {
     await page.locator('.note-reference-toggle').click();
     assert.equal(await page.locator('.note-reference').isVisible(),true);
     await page.locator('.note-reference-toggle').click();
-    await page.locator('.mistake-library').screenshot({path:path.join(process.env.TEMP,'elp-notebook-compact.png'),animations:'disabled'});
+    await page.locator('.mistake-library').screenshot({path:path.join(screenshotRoot,'elp-notebook-compact.png'),animations:'disabled'});
     await page.locator('[data-mistake-filter="all"]').click();
     await page.locator(`[data-practice-correction="${speakingNote.id}"]`).click();
     await page.locator('#correctionStudyAttempt').fill('She goes home.');

@@ -35,7 +35,7 @@ const server = http.createServer(async (req, res) => {
 });
 (async () => {
   await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
-  const browser=await chromium.launch({channel:'chrome',headless:true});
+  const browser=await chromium.launch({channel:process.env.ELP_BROWSER_CHANNEL === 'bundled' ? undefined : 'chrome',headless:true});
   try {
     const page=await browser.newPage({viewport:{width:1440,height:1000}});
     const errors=[], external=[];
@@ -189,7 +189,7 @@ const server = http.createServer(async (req, res) => {
     assert.deepEqual(emptyCorrectionReport.headings,['原文优化建议']);
     assert.equal(await page.locator('.review-workspace-header').evaluate(el=>getComputedStyle(el).position),'static');
     await page.evaluate(()=>window.scrollTo(0,0));
-    await page.screenshot({path:path.join(process.env.TEMP || root,'elp-question-review.png'),fullPage:false});
+    await page.screenshot({path:path.join(require('node:os').tmpdir(),'elp-question-review.png'),fullPage:false});
     await page.setViewportSize({width:390,height:844});
     assert.equal(await page.locator('#reviewWorkspace').evaluate(el=>el.scrollWidth<=el.clientWidth+1),true,'page must fit narrow screens');
     await page.locator('#closeReviewWorkspace').click();
@@ -197,6 +197,7 @@ const server = http.createServer(async (req, res) => {
     await page.locator('[data-writing-id="w1"]').click();
     await checkMarkdown('#reviewOverviewSummary');
     await page.reload();
+    await page.locator('#reviewWorkspace').waitFor({state:'visible'});
     assert.equal(await page.locator('#reviewWorkspace').isVisible(),true,'direct report route must restore on reload');
     assert.equal(await page.locator('#reviewWorkspaceOriginal').textContent(),'Original essay');
     const legacySpeaking = await page.evaluate(() => {
@@ -236,6 +237,7 @@ const server = http.createServer(async (req, res) => {
     delete data.speaking[0].punctuationSource;
     await page.goto(`http://127.0.0.1:${server.address().port}/#review/speaking/s1`);
     await page.reload();
+    await page.locator('#reviewRawTranscript').filter({hasText:'I like cycling.'}).waitFor({state:'visible'});
     assert.equal(await page.locator('#reviewRawTranscript').textContent(),'I like cycling.');
     assert.equal(await page.locator('#reviewRawTranscript mark').count(),0);
     punctuationResponse = 'I enjoy cycling.';
@@ -244,8 +246,9 @@ const server = http.createServer(async (req, res) => {
     assert.equal(data.speaking[0].punctuatedTranscript,undefined,'reject changes to words');
     punctuationResponse = 'I like cycling.';
     await page.locator('#generatePunctuation').click();
-    await page.waitForFunction(()=>document.querySelector('#generatePunctuation').classList.contains('hidden'));
+    await page.locator('#generatePunctuation').waitFor({state:'hidden'});
     await page.reload();
+    await page.locator('#reviewWorkspaceOriginal').filter({hasText:'I like cycling.'}).waitFor({state:'visible'});
     assert.equal(await page.locator('#reviewWorkspaceOriginal').textContent(),'I like cycling.');
     assert.equal(data.speaking[0].transcript,'A later edit.','edited practice text must autosave while the report keeps its submitted snapshot');
     assert.equal(data.speaking[0].punctuatedTranscript,'I like cycling.');

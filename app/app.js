@@ -344,12 +344,27 @@
   function normalizeAiPlanDay(value = {}) {
     const day = normalizePlanDay(value);
     if (day.writing) {
-      day.writingReview = 1;
-      day.writingRewrite = 1;
+      if (value.writingReview == null) day.writingReview = 1;
+      if (value.writingRewrite == null) day.writingRewrite = 1;
     }
-    if (day.speaking) day.speakingReview = 1;
-    if ((day.writing || day.speaking) && day.languageMinutes < 10) day.languageMinutes = 10;
+    if (day.speaking && value.speakingReview == null) day.speakingReview = 1;
+    if ((day.writing || day.speaking) && value.languageMinutes == null) day.languageMinutes = 10;
     return day;
+  }
+
+  function fitAiPlanDayBudget(day, dailyMinutes) {
+    const output = day.writing * 40 + day.speaking * 10;
+    const specificReview = day.writingReview * 10 + day.writingRewrite * 15 + day.speakingReview * 10 + day.languageMinutes;
+    const minimumGeneralReview = Math.max(0, Math.ceil(output * 2 / 3) - specificReview);
+    const remaining = dailyMinutes - output - specificReview;
+    if (remaining < minimumGeneralReview) {
+      const error = new Error(`${day.date || "本日"} 的具体训练至少需要 ${output + specificReview + minimumGeneralReview} 分钟，超过每日 ${dailyMinutes} 分钟；请减少具体训练数量`);
+      error.planFormatFailure = true;
+      throw error;
+    }
+    // General review is a flexible time allowance. Fit that allowance to the
+    // actual remaining budget without changing any concrete practice counts.
+    return { ...day, reviewMinutes: Math.max(minimumGeneralReview, Math.min(day.reviewMinutes, remaining)) };
   }
 
   function parsePlanDate(value) {
@@ -492,6 +507,35 @@
   let planGenerationController = null;
   let planCommitting = false;
 
+  function alignAiPlanDays(days, expectedDates, dayIndexes) {
+    if (!Array.isArray(days) || days.length !== expectedDates.length) throw new Error("返回天数不完整");
+    const keyed = new Map();
+    for (const day of days) {
+      if (!day || typeof day !== "object") throw new Error("每日任务无效");
+      let date;
+      if (day.date != null && day.date !== "") {
+        // Accept date-only spelling variants, never timestamps or shifted dates.
+        const match = typeof day.date === "string" && day.date.trim().match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+        if (!match) throw new Error("返回日期格式无效，应为 YYYY-MM-DD");
+        date = `${match[1]}-${match[2].padStart(2, "0")}-${match[3].padStart(2, "0")}`;
+        if (!expectedDates.includes(date)) throw new Error(`返回日期 ${date} 不在本批范围内`);
+        if (day.dayIndex != null && day.dayIndex !== dayIndexes[expectedDates.indexOf(date)]) throw new Error("日期与阶段序号冲突");
+      } else {
+        // Legacy providers may omit date. Only an explicit unique stage index
+        // can recover the mapping; array position alone is not evidence.
+        const index = day.dayIndex ?? day.weekday;
+        if (!Number.isInteger(index) || !dayIndexes.includes(index)) throw new Error("缺少有效日期或阶段序号");
+        date = expectedDates[dayIndexes.indexOf(index)];
+      }
+      if (keyed.has(date)) throw new Error(`返回日期 ${date} 重复`);
+      keyed.set(date, { ...day, date });
+    }
+    return expectedDates.map(date => {
+      if (!keyed.has(date)) throw new Error(`缺少 ${date} 的任务`);
+      return keyed.get(date);
+    });
+  }
+
   async function generateAiPlan() {
     if (!aiConnected) return routeTo("settings");
     if (planGenerationController) return;
@@ -529,17 +573,19 @@
           goalGap:`现有：${profile.currentLevel}；目标：${profile.targetLevel}。未经过测评，不承诺达标。`},
         rules:{reviewShare:0.4,scope:["writing","speaking","review"]}};
       async function batch(blueprint, weekdays, phaseIndex, precedingDays = []) {
+        const dates = weekdays.map(n => formatPlanDate(addPlanDays(blueprint.startDate, n - 1)));
+        let formatFeedback = "";
         for (let attempt = 0; attempt < 2; attempt++) {
           checkCurrent(profile);
           if (requests >= maxRequests) throw new Error(`已达到本次 ${maxRequests} 次请求上限，原计划保持不变；请使用非思考模式模型后重试`);
           requests++;
-          result.textContent = `正在生成阶段 ${phaseIndex + 1}/${blueprints.length}：星期 ${weekdays.join("、")}（请求 ${requests}/${maxRequests}）……原计划尚未替换。`;
+          result.textContent = `正在生成阶段 ${phaseIndex + 1}/${blueprints.length}：${dates[0]} — ${dates.at(-1)}（请求 ${requests}/${maxRequests}）……原计划尚未替换。`;
           const payload = {
             messages: [
-              {role:"system", content:"你是写作与口语学习规划师。只输出 JSON：{summary:string,priorities:string[],phases:[{days:[]}]}，phases 只能有一项。仅生成指定阶段、指定 weekday 的任务，weekday 为周一 1 到周日 7，严格按指定顺序，每天恰好一次。每项含 weekday、writing、speaking、writingReview、writingRewrite、speakingReview、languageMinutes、reviewMinutes、note。所有数值是非负整数；writing、writingReview、writingRewrite、speakingReview 至多1，speaking至多2，languageMinutes至多60，reviewMinutes至多240。note至多50字，summary至多120字，priorities至多4条。不要输出解释或思考。只规划写作、口语及复盘，不安排其他科目。至少 40% 的可用时间安排给复盘、重练和语料记忆，任务量符合每日时间；周日安排轻量复盘。写作应包含精改、重写；口语应包含回听、重说。不要虚构诊断。"},
+              {role:"system", content:"你是写作与口语学习规划师。只输出 JSON：{summary:string,priorities:string[],phases:[{days:[]}]}，phases 只能有一项。仅为 requestedDays 中的日期生成任务，每天恰好一次，按指定顺序返回。每项含 date、dayIndex、writing、speaking、writingReview、writingRewrite、speakingReview、languageMinutes、reviewMinutes、note。date 原样复制输入 YYYY-MM-DD；dayIndex 是阶段内第几天，原样复制。calendarWeekday 才是自然星期（周一1至周日7），仅供安排休息，不要把它当阶段序号，不需要返回 weekday。所有任务数值是非负整数；writing、writingReview、writingRewrite、speakingReview 至多1，speaking至多2，languageMinutes至多60，reviewMinutes至多240。note至多50字，summary至多120字，priorities至多4条。不要输出解释或思考。只规划写作、口语及复盘，不安排其他科目。至少 40% 的可用时间安排给复盘、重练和语料记忆，任务量符合每日时间；周日安排轻量复盘。写作应包含精改、重写；口语应包含回听、重说。不要虚构诊断。"},
               {role:"system",content:"衔接要求：sharedContext 是整个计划统一且不可改写的框架。completedPhases 和 precedingDays 是已确认内容，只能承接，不能重写或假设未提供的完成情况。根据后续 roadmap 阶段目标安排当前任务：基础、强化、冲刺逐步推进，不在冲刺期重新安排大量基础新课。拆分只改变本次输出范围，目标、术语、时间约束和训练重点保持一致；后半批承接前半批的写作精改、重写、口语重说与复盘，避免重复引入同一任务或无前序练习的孤立重练。后续阶段尚未生成，只能按其目标预留衔接，不能声称已知道其具体任务。"},
-              {role:"system",content:"整个周期已先分析时长、每日强度，再分大阶段与按实际日期的小阶段。每个小阶段必须依据其在大阶段中的位置改变任务重点，不能复制周模板。dates 按顺序列出本批实际日期；每天必须返回对应 date 和 weekday（小阶段中的序号，不是自然星期）。examDate 当天全部任务为0，仅热身说明。每日估算分钟=writing*40+speaking*10+writingReview*10+writingRewrite*15+speakingReview*10+languageMinutes+reviewMinutes，不得超出 dailyMinutes；至少40%用于复盘。高强度周期每周安排恢复日。completedMilestones 表示更早小阶段已确认的训练目标及数量，completedPhases 是最近小阶段实际内容，precedingDays 是本小阶段已完成批次。后续目标从 roadmap 读取，保持先基础后专项再整合冲刺。"},
-              {role:"user", content:JSON.stringify({sharedContext,profile, phase:blueprint, phaseIndex, phaseCount:blueprints.length, weekdays, dates:weekdays.map(n=>formatPlanDate(addPlanDays(blueprint.startDate,n-1))),completedMilestones:phases.slice(0,-1).map(p=>({macroIndex:p.macroIndex,step:p.step,startDate:p.startDate,endDate:p.endDate,totals:p.days.reduce((a,d)=>({writing:a.writing+d.writing,speaking:a.speaking+d.speaking}),{writing:0,speaking:0})})),completedPhases:phases.slice(-1),precedingDays:precedingDays.map((day,i)=>({weekday:i+1,...day}))})}
+              {role:"system",content:"整个周期已先分析时长、每日强度，再分大阶段与按实际日期的小阶段。每个小阶段必须依据其在大阶段中的位置改变任务重点，不能复制周模板。requestedDays 是本批唯一日期映射；dates 与 weekdays 为旧版兼容字段，其中 weekdays 仍是阶段序号，不是自然星期。不要自行计算或改写日期。examDate 当天全部任务为0，仅热身说明。每日估算分钟=writing*40+speaking*10+writingReview*10+writingRewrite*15+speakingReview*10+languageMinutes+reviewMinutes，不得超出 dailyMinutes；至少40%用于复盘。高强度周期每周安排恢复日。completedMilestones 表示更早小阶段已确认的训练目标及数量，completedPhases 是最近小阶段实际内容，precedingDays 是本小阶段已完成批次。后续目标从 roadmap 读取，保持先基础后专项再整合冲刺。"},
+              {role:"user", content:JSON.stringify({sharedContext,profile, phase:blueprint, phaseIndex, phaseCount:blueprints.length, weekdays, dates, requestedDays:dates.map((date,i)=>({date,dayIndex:weekdays[i],calendarWeekday:mondayIndex(parsePlanDate(date))+1})),formatFeedback,completedMilestones:phases.slice(0,-1).map(p=>({macroIndex:p.macroIndex,step:p.step,startDate:p.startDate,endDate:p.endDate,totals:p.days.reduce((a,d)=>({writing:a.writing+d.writing,speaking:a.speaking+d.speaking}),{writing:0,speaking:0})})),completedPhases:phases.slice(-1),precedingDays:precedingDays.map((day,i)=>({dayIndex:i+1,weekday:i+1,...day}))})}
             ], temperature:0, max_tokens:6000, output_contract:"study-plan-json-v1"
           };
           try {
@@ -559,17 +605,14 @@
             try {
               const parsed = parseAiJson(data.content);
               if (!Array.isArray(parsed.phases) || parsed.phases.length !== 1) throw new Error("阶段数量错误");
-              days = parsed.phases[0]?.days;
+              days = alignAiPlanDays(parsed.phases[0]?.days, dates, weekdays);
               const limits = {writing:1,speaking:2,writingReview:1,writingRewrite:1,speakingReview:1,languageMinutes:60,reviewMinutes:240};
               if (!Array.isArray(days) || days.length !== weekdays.length || days.some((day,i) =>
-                !day || day.weekday !== weekdays[i] || typeof day.note !== "string" || day.note.length > 50 ||
+                !day || typeof day.note !== "string" || day.note.length > 50 ||
                 Object.entries(limits).some(([key,max]) => !Number.isInteger(day[key]) || day[key] < 0 || day[key] > max)))
                 throw new Error("日期、任务字段或数值不完整");
             } catch (error) { error.planFormatFailure = true; throw error; }
-            const normalizedDays = days.map((day,i)=>({...normalizeAiPlanDay(day),date:formatPlanDate(addPlanDays(blueprint.startDate,weekdays[i]-1))}));
-            if (days.some((day,i)=>day.date !== normalizedDays[i].date)) {
-              const error = new Error("返回日期不匹配"); error.planFormatFailure=true; throw error;
-            }
+            const normalizedDays = days.map((day,i)=>fitAiPlanDayBudget({...normalizeAiPlanDay(day),date:dates[i]},profile.dailyMinutes));
             for (const day of normalizedDays) {
               if (day.date === profile.examDate) {
                 if (Object.entries(day).some(([key,value])=>typeof value === "number" && value !== 0)) {
@@ -593,6 +636,7 @@
               return [...left,...right];
             }
             if (attempt || (!error.planFormatFailure && !error.retryableAiFailure)) throw error;
+            if (error.planFormatFailure) formatFeedback = `上次返回未通过校验：${error.message}。请重新生成本批全部日期，逐项复制 requestedDays 中的 date 和 dayIndex，并检查任务数值。`;
             await new Promise(resolve => setTimeout(resolve, 500));
           }
         }
@@ -1497,6 +1541,7 @@
       reviewedAt: existing?.reviewedAt || ""
       ,status: existing?.status || "draft"
       ,startedAt: existing?.startedAt || ""
+      ,finishedAt: existing?.finishedAt || ""
       ,rootSessionId: existing?.rootSessionId || existing?.id || activeWritingId || ""
       ,parentSessionId: existing?.parentSessionId || null
       ,attemptNumber: existing?.attemptNumber || 1
@@ -1609,12 +1654,22 @@
       clearInterval(timerInterval);
       timerInterval = null;
     }
-    await saveWriting({ silent: true });
+    if (!await saveWriting({ silent: true })) return;
     const item = state.writings.find(entry => entry.id === activeWritingId);
     if (!item) return;
+    const previousStatus = item.status;
+    const previousFinishedAt = item.finishedAt;
     item.status = "completed";
-    item.finishedAt = new Date().toISOString();
-    await saveState(true);
+    item.finishedAt ||= new Date().toISOString();
+    try {
+      await saveState(true);
+    } catch {
+      item.status = previousStatus;
+      item.finishedAt = previousFinishedAt;
+      $("#saveStatus").textContent = "完成状态保存失败，正文仍保留在编辑区，请重试";
+      showToast("尚未保存完成状态，请检查数据目录后重试");
+      return;
+    }
     setPracticeFocus(false);
     renderWritingSession();
     renderWritingHistory();
